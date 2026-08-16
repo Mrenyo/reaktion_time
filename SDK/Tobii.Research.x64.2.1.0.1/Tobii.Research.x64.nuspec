@@ -1,0 +1,21 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Tobii.Research.x64</id>
+    <version>2.1.0.1</version>
+    <title>Tobii research SDK</title>
+    <authors>Tobii AB</authors>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="file">License.md</license>
+    <licenseUrl>https://aka.ms/deprecateLicenseUrl</licenseUrl>
+    <icon>sdk.png</icon>
+    <projectUrl>https://developer.tobiipro.com/</projectUrl>
+    <description>Tobii Pro .NET SDK. Used for developing applications for the Tobii Pro line of eye trackers. You need at least one eye tracker to make use of this SDK.</description>
+    <releaseNotes>http://developer.tobiipro.com/tobiiprosdk/whatsnew.html</releaseNotes>
+    <tags>Tobii, Research, EyeTracking, Eye, Tracking, SDK, Gaze</tags>
+    <readme>README.md</readme>
+    <dependencies>
+      <group targetFramework=".NETStandard2.0" />
+    </dependencies>
+  </metadata>
+</package>
