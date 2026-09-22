@@ -23,9 +23,19 @@ a mérés nem indul el, és a hibaüzenet megmondja, melyik érték a rossz.
 Megjegyzés (`//`) és hiányzó mező is megengedett: a hiányzó mező az adott mód
 alapértékét kapja.
 
-| Mező | Jelentés | Normál / periférikus alapérték |
+Általános mezők:
+
+| Mező | Jelentés | Alapérték |
 |---|---|---|
 | `DefaultViewingDistanceCm` | nézési távolság, ha a Tobii nem tudja megmérni | 60 |
+| `MinValidGazeSampleRatio` | ha a válaszablak tekintetmintáinak ennél kisebb hányada érvényes, a próba érvénytelen (`InsufficientGazeData`) | 0,5 |
+| `Hardware.EspPortName` | az ESP soros portja (pl. `"COM5"`); üresen a program az USB-azonosítók alapján keresi meg | üres |
+| `Hardware.EspBaudRate` | a soros port sebessége, egyezzen az ESP firmware-rel | 115200 |
+
+A `NormalMode` és a `PeripheralMode` szakasz mezői:
+
+| Mező | Jelentés | Normál / periférikus alapérték |
+|---|---|---|
 | `TestTrials` | ennyi **érvényes** tesztpróba a cél | 10 / 10 |
 | `PracticeTrials` | gyakorló próbák a teszt előtt (mentődnek, de nem számítanak bele az eredménybe) | 3 / 3 |
 | `RepeatInvalidTrials` | az érvénytelen próbák helyett új próba jön | true / true |
@@ -90,7 +100,7 @@ Próbaoszlopok:
 | `TargetValidTrials` | a cél érvényes próbaszám |
 | `EspReactionTimeMs` | a hardveresen (ESP + fotodióda) mért reakcióidő |
 | `LocalReactionTimeMs` | a PC-n mért idő (a soros válasz beérkezéséig) |
-| `Valid`, `InvalidReason` | `None`, `Timeout`, `TrackerUnavailable`, `InsufficientGazeData` (a válaszablak mintáinak kevesebb mint 50%-a érvényes) vagy `GazeViolation` |
+| `Valid`, `InvalidReason` | `None`, `Timeout`, `TrackerUnavailable`, `InsufficientGazeData` (az érvényes minták aránya a `MinValidGazeSampleRatio` alatt van) vagy `GazeViolation` |
 | `RecordedAt` | időbélyeg |
 | `ForeperiodMs` | az inger előtti várakozás |
 | `ScanoutCorrectionUs` | az ESP-nek küldött korrekció |
