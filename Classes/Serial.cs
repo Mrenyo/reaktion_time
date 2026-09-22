@@ -330,7 +330,7 @@ namespace ReactionTimeMeasurementApp.Classes
             var candidates = GetPortCandidates();
             if (candidates.Length == 0)
             {
-                throw new IOException("Nem talalhato elerheto COM-port.");
+                throw new IOException("Nem található elérhető COM-port.");
             }
 
             var preferred = candidates.FirstOrDefault(candidate => candidate.Score >= EspCandidateScore);
@@ -346,7 +346,7 @@ namespace ReactionTimeMeasurementApp.Classes
 
             var availablePorts = string.Join(", ", candidates.Select(candidate => candidate.DisplayText));
             throw new IOException(
-                $"Nem sikerult egyertelmuen azonositani az ESP COM-portjat. Elerheto portok: {availablePorts}");
+                $"Nem sikerült egyértelműen azonosítani az ESP COM-portját. Elérhető portok: {availablePorts}");
         }
 
         private static SerialPortCandidate[] GetPortCandidates()
@@ -638,7 +638,7 @@ namespace ReactionTimeMeasurementApp.Classes
                     catch (TimeoutException ex)
                     {
                         throw new IOException(
-                            $"A soros port {IoAttemptCount} probalkozas utan sem tudta elkuldeni az adatot {WriteTimeoutMilliseconds} ms-os irasi idokorlattal.",
+                            $"A soros port {IoAttemptCount} próbálkozás után sem tudta elküldeni az adatot {WriteTimeoutMilliseconds} ms-os írási időkorláttal.",
                             ex);
                     }
                 }
@@ -678,7 +678,7 @@ namespace ReactionTimeMeasurementApp.Classes
             ObserveFault(writeTask);
 
             throw new SerialWriteTimedOutException(
-                $"A soros port {WriteTimeoutMilliseconds} ms alatt nem vette at az irando adatot, ezert a kapcsolat le lett zarva.");
+                $"A soros port {WriteTimeoutMilliseconds} ms alatt nem vette át az írandó adatot, ezért a kapcsolat le lett zárva.");
         }
 
         private static async Task WriteStreamAsync(Stream stream, byte[] bytes, CancellationToken cancellationToken)
@@ -690,7 +690,7 @@ namespace ReactionTimeMeasurementApp.Classes
             }
             catch (TimeoutException ex)
             {
-                throw new SerialWriteTimedOutException("A soros port stream irasa idokorlatba utkozott.", ex);
+                throw new SerialWriteTimedOutException("A soros port stream írása időkorlátba ütközött.", ex);
             }
         }
 

@@ -6,8 +6,8 @@ namespace ReactionTimeMeasurementApp;
 internal static class ViewBackgroundStyler
 {
     // A háttérképet használó nézetek (menü, kalibráció, átmeneti takaró) mind ugyanakkorák, ezért
-    // elég a legutóbb használt néhány méretet megtartani. Korábban minden valaha előfordult méret
-    // (pl. ablakátméretezéskor minden köztes méret, 1080p-n ~8 MB-onként) örökre a memóriában maradt.
+    // elég a legutóbb használt néhány méretet megtartani. Így az ablak átméretezésekor sem gyűlnek a
+    // memóriában a köztes méretek képei (1080p-n ~8 MB-onként).
     private const int MaxCachedSizes = 2;
 
     private static readonly object SyncRoot = new();

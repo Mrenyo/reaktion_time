@@ -3,7 +3,7 @@
 public enum MeasureMode
 {
     Normal,
-    Alternative
+    Peripheral
 }
 
 public sealed class MeasureModeRequestedEventArgs : EventArgs

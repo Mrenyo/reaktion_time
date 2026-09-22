@@ -23,9 +23,9 @@ public partial class StatisticsView : UserControl
         RefreshSessionList();
     }
 
-    // A MainMenu minden befejezett mérés után ezt hívja meg. Mivel a mérések mostantól lemezre
-    // (lásd MeasurementResultStore, "measurements" mappa) is elmentődnek, ilyenkor a teljes,
-    // lemezen lévő előzményt újraolvassuk - nem csak az imént befejezett session-t jelenítjük meg.
+    // A MainMenu minden mérés vége után ezt hívja meg. A mérések lemezre mentődnek (lásd
+    // MeasurementResultStore), ezért ilyenkor a teljes, lemezen lévő előzményt újraolvassuk,
+    // nem csak az imént befejezett munkamenetet jelenítjük meg.
     public void SetLatestSessionResult(MeasurementSessionResult? session)
     {
         RefreshSessionList(session);

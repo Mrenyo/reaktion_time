@@ -2,8 +2,8 @@ using ReactionTimeMeasurementApp.Classes;
 
 namespace ReactionTimeMeasurementApp;
 
-// Miért érvénytelen egy próba. A korábbi, egyetlen Valid=False jelző nem különböztette meg az
-// időtúllépést a tekintethibától; az Unspecified a régi (ok nélkül mentett) fájlokhoz tartozik.
+// Miért érvénytelen egy próba. Az Unspecified az 1-es formátumverziójú fájlokhoz tartozik, amelyekben
+// csak a Valid oszlop szerepel, az ok nem.
 public enum TrialInvalidReason
 {
     None,

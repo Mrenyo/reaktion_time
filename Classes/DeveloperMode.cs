@@ -2,11 +2,8 @@ namespace ReactionTimeMeasurementApp.Classes;
 
 // Központosítja, hogy az alkalmazás fejlesztői (dev) módban fut-e. Dev módban jelenik meg
 // a MainMenu gaze-overlay-je (a szemkövető aktuális nézési pontját mutató kör) és a statisztika
-// nézet scanout-korrekció debug oszlopa. Korábban ez két külön, egymástól független, kódba égetett
-// bool konstans volt, amit csak forráskód-módosítással és újrafordítással lehetett bekapcsolni -
-// emiatt tudott a kettő értéke el is térni egymástól. Most egyetlen, futásidőben (parancssori
-// kapcsolóval vagy környezeti változóval) vezérelhető jelző dönti el mindkettőt, alapértelmezetten
-// kikapcsolt (production-biztos) állapotban.
+// nézet scanout-korrekció debug oszlopa. A jelzőt futásidőben, parancssori kapcsolóval vagy
+// környezeti változóval lehet bekapcsolni; alapértelmezetten ki van kapcsolva.
 internal static class DeveloperMode
 {
     private const string CommandLineSwitch = "--dev";

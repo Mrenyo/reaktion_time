@@ -9,7 +9,7 @@ public partial class MainMenu : Form
         Menu,
         Calibration,
         NormalMeasure,
-        AlternativeMeasure,
+        PeripheralMeasure,
         Statistics
     }
 
@@ -52,7 +52,7 @@ public partial class MainMenu : Form
 
         _menuView.OpenCalibrationRequested += (_, _) => NavigateTo(ViewKey.Calibration);
         _menuView.OpenMeasureRequested += (_, eventArgs) =>
-            NavigateTo(eventArgs.Mode == MeasureMode.Normal ? ViewKey.NormalMeasure : ViewKey.AlternativeMeasure);
+            NavigateTo(eventArgs.Mode == MeasureMode.Normal ? ViewKey.NormalMeasure : ViewKey.PeripheralMeasure);
         _menuView.OpenStatisticsRequested += (_, _) => NavigateTo(ViewKey.Statistics);
 
         _viewFactories = new Dictionary<ViewKey, Func<Control>>
@@ -60,7 +60,7 @@ public partial class MainMenu : Form
             [ViewKey.Menu] = () => ConfigureView(_menuView),
             [ViewKey.Calibration] = CreateCalibrationView,
             [ViewKey.NormalMeasure] = CreateNormalMeasureView,
-            [ViewKey.AlternativeMeasure] = CreateAlternativeMeasureView,
+            [ViewKey.PeripheralMeasure] = CreatePeripheralMeasureView,
             [ViewKey.Statistics] = CreateStatisticsView
         };
 
@@ -209,7 +209,7 @@ public partial class MainMenu : Form
         return view;
     }
 
-    private Measure_1 CreateAlternativeMeasureView()
+    private Measure_1 CreatePeripheralMeasureView()
     {
         var view = ConfigureView(new Measure_1(tobiiService, manageTrackingLifecycle: !_devMode));
 

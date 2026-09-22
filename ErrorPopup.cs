@@ -74,20 +74,23 @@ internal static class ErrorPopup
     {
         if (IsPortBusyError(exception))
         {
-            var busyMessage = $"A(z) {portName} port foglalt, ezert az alkalmazas nem tudja megnyitni. Zard be a Serial Monitort, PlatformIO/Arduino monitort, vagy a masik futo alkalmazaspeldanyt, majd probald ujra.";
-            Show(owner, AppendDetails(busyMessage, exception), "COM port foglalt", MessageBoxIcon.Error, exception);
+            var busyMessage = $"A(z) {portName} port foglalt, ezért az alkalmazás nem tudja megnyitni. Zárd be a Serial Monitort, "
+                + "a PlatformIO/Arduino monitort vagy a másik futó alkalmazáspéldányt, majd próbáld újra.";
+            Show(owner, AppendDetails(busyMessage, exception), "COM-port foglalt", MessageBoxIcon.Error, exception);
             return;
         }
 
-        var message = $"Az ESP nem erheto el a(z) {portName} porton. Ellenorizd a csatlakozast, majd probald ujra.";
+        var message = $"Az ESP nem érhető el a(z) {portName} porton. Ellenőrizd a csatlakozást, majd próbáld újra.";
         Show(owner, AppendDetails(message, exception), "ESP kapcsolati hiba", MessageBoxIcon.Error, exception);
     }
 
     internal static void ShowEspCommunicationError(Control? owner, string portName, int baudRate, Exception? exception = null)
     {
-        var message = $"Az ESP a(z) {portName} porton megnyilt, de nem sikerult ervenyes adatot valtani vele. Ellenorizd, hogy az ESP firmware {baudRate} baudon fut-e, es a numerikus scanout protokollt hasznalja-e.";
-        Show(owner, AppendDetails(message, exception), "ESP kommunikacios hiba", MessageBoxIcon.Error, exception);
+        var message = $"Az ESP a(z) {portName} porton megnyílt, de nem sikerült érvényes adatot váltani vele. Ellenőrizd, hogy az ESP "
+            + $"firmware {baudRate} baudon fut-e, és a numerikus scanout protokollt használja-e.";
+        Show(owner, AppendDetails(message, exception), "ESP kommunikációs hiba", MessageBoxIcon.Error, exception);
     }
+
     internal static void ShowGeneral(Control? owner, Exception? exception = null)
     {
         const string message = "Váratlan hiba történt. Próbáld újra, vagy indítsd újra az alkalmazást.";
@@ -99,7 +102,6 @@ internal static class ErrorPopup
         return exception is UnauthorizedAccessException
             || exception?.InnerException is UnauthorizedAccessException
             || exception?.Message.Contains("denied", StringComparison.OrdinalIgnoreCase) == true
-            || exception?.Message.Contains("hozzaferes", StringComparison.OrdinalIgnoreCase) == true
             || exception?.Message.Contains("hozzáférés", StringComparison.OrdinalIgnoreCase) == true;
     }
 

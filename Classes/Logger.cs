@@ -7,10 +7,9 @@ internal enum LogLevel
     Error
 }
 
-// Egyszerű, fájlba is író napló. A korábbi Functions.Debug (System.Diagnostics.Debug.WriteLine)
-// Release build alatt semmit nem ír ki, ezért egy résztvevőnél történt hibás mérés utólag
-// visszakövethetetlen volt. Ez az osztály ugyanazt az üzenetet mindig egy "logs" mappába is kiírja
-// (a mérési adatok mellé, lásd DataLocations), így Release módban is marad nyoma a futásnak.
+// Egyszerű, fájlba is író napló. A Debug.WriteLine Release buildben semmit nem ír ki, ezért minden
+// üzenet egy "logs" mappába is kerül (a mérési adatok mellé, lásd DataLocations): így egy
+// résztvevőnél történt hibás mérés utólag is visszakövethető.
 internal static class Logger
 {
     private static readonly object WriteLock = new();

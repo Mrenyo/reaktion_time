@@ -7,7 +7,7 @@ namespace ReactionTimeMeasurementApp.Classes;
 // teljes sorszámba a képkockák közti holtidő (vertical blanking) sorai is beletartoznak.
 //
 // Ha a VerticalActiveLines / VerticalTotalLines 0 (a pontos képidőzítés nem ismert), a számítás a
-// korábbi, holtidő nélküli közelítésre esik vissza: sor = képpontsor, teljes sorszám = DisplayHeight.
+// holtidő nélküli közelítésre esik vissza: sor = képpontsor, teljes sorszám = DisplayHeight.
 internal readonly record struct ScanoutTrialParameters(
     double StimulusY,
     double PhotodiodeY,

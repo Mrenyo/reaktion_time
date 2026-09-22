@@ -1,9 +1,8 @@
 namespace ReactionTimeMeasurementApp.Classes;
 
 // Az alkalmazás által írt fájlok (mérési eredmények, tekintetminták, beállítások, napló) helye.
-// Korábban minden az exe mellé került, ami Program Files alá telepítve nem írható - ott a mentés
-// csendben meghiúsult volna. A felhasználó Dokumentumok mappája mindig írható, és a kutató is
-// könnyen megtalálja. A REACTIONTIME_DATA_DIR környezeti változóval más mappa is megadható
+// Az exe mappája (pl. Program Files alatt) nem mindig írható, a felhasználó Dokumentumok mappája
+// viszont igen, és a kutató is könnyen megtalálja. A REACTIONTIME_DATA_DIR környezeti változóval más mappa is megadható
 // (pl. hordozható telepítéshez vagy hálózati mappához).
 internal static class DataLocations
 {
@@ -20,7 +19,7 @@ internal static class DataLocations
 
     internal static string SettingsFilePath => Path.Combine(RootDirectory, "beallitasok.json");
 
-    // A korábbi verziók az exe mellé mentettek; ezeket a statisztika továbbra is beolvassa.
+    // Az 1-es formátumverziójú mérések helye (az exe mellett); a statisztika ezeket is beolvassa.
     internal static string LegacyMeasurementsDirectory => Path.Combine(AppContext.BaseDirectory, "measurements");
 
     private static string BuildRootDirectory()

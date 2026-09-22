@@ -6,10 +6,11 @@ namespace ReactionTimeMeasurementApp.Classes;
 // A mentett mérési munkamenetek beolvasása a StatisticsView számára. Az írást a
 // MeasurementSessionWriter végzi, próbánként.
 //
-// A beolvasás az oszlopfejléc NEVEI alapján történik (nem pozíció szerint), így a korábbi
-// formátumú fájlok (7 vagy 11 oszlop, "# CompletedAt=" fejléc, lezáró sor nélkül) is olvashatók
-// maradnak. A korábbi verziók csak a teljesen befejezett méréseket mentették, ezért a lezáró sor
-// nélküli régi fájl "befejezett"; az új formátumban a hiányzó lezáró sor megszakadt mérést jelent.
+// A beolvasás az oszlopfejléc NEVEI alapján történik (nem pozíció szerint), így az 1-es
+// formátumverziójú fájlok is olvashatók: ezekben nincs "# FormatVersion=" sor, 7 vagy 11 oszlop
+// van, az időpont a "# CompletedAt=" sorban áll, és nincs lezáró sor. Az 1-es formátum csak a
+// teljesen befejezett méréseket tartalmazta, ezért ott a lezáró sor hiánya "befejezett" állapotot
+// jelent; a 2-es formátumban viszont megszakadt mérést.
 internal static class MeasurementResultStore
 {
     internal static IReadOnlyList<MeasurementSessionResult> LoadAll()
