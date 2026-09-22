@@ -14,7 +14,7 @@ public partial class CalibrationView : UserControl
     internal CalibrationView(TobiiService tobiiService)
     {
         _tobiiService = tobiiService;
-        _ = ViewBackgroundStyler.TryGetScaledBackground(ClientSize);
+        _ = ViewBackgroundStyler.TryLoadBackground();
         InitializeComponent();
         DoubleBuffered = true;
         LoadCalibrationImage();
@@ -40,17 +40,43 @@ public partial class CalibrationView : UserControl
         BackRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void currentConfigurationButton_Click(object? sender, EventArgs e)
+    // Nem elég, hogy csatlakozik egy szemkövető: ellenőrizzük, hogy van-e rajta kalibráció, és
+    // hogy ténylegesen érvényes tekintetadatot küld-e (lásd TobiiService.CheckExistingCalibrationAsync).
+    private async void currentConfigurationButton_Click(object? sender, EventArgs e)
     {
-        _tobiiService.Initialize(forceRefresh: true);
-        if (!_tobiiService.IsTrackerAvailable)
-        {
-            ErrorPopup.ShowTobiiNotConnected(this);
-            return;
-        }
+        var originalText = currentConfigurationButton.Text;
+        SetButtonsEnabled(false);
+        currentConfigurationButton.Text = "✓ Kalibráció ellenőrzése...";
 
-        CalibrationCompleted?.Invoke(this, EventArgs.Empty);
-        BackRequested?.Invoke(this, EventArgs.Empty);
+        try
+        {
+            var (result, validGazeRatio) = await _tobiiService.CheckExistingCalibrationAsync();
+            switch (result)
+            {
+                case CalibrationCheckResult.Ok:
+                    CalibrationCompleted?.Invoke(this, EventArgs.Empty);
+                    BackRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+                case CalibrationCheckResult.TrackerNotFound:
+                    ErrorPopup.ShowTobiiNotConnected(this);
+                    break;
+                case CalibrationCheckResult.NoCalibrationData:
+                    ErrorPopup.ShowCalibrationMissing(this);
+                    break;
+                case CalibrationCheckResult.NoValidGaze:
+                    ErrorPopup.ShowGazeNotDetected(this, validGazeRatio);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorPopup.ShowGeneral(this, ex);
+        }
+        finally
+        {
+            currentConfigurationButton.Text = originalText;
+            SetButtonsEnabled(true);
+        }
     }
 
     private async void recalibrationButton_Click(object? sender, EventArgs e)
@@ -60,6 +86,7 @@ public partial class CalibrationView : UserControl
 
         try
         {
+            await _tobiiService.InitializeAsync(forceRefresh: true);
             var calibrationResult = await Task.Run(() => _tobiiService.RunUserCalibration());
             if (calibrationResult < 0)
             {

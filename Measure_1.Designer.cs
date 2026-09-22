@@ -79,7 +79,6 @@ namespace ReactionTimeMeasurementApp
             stagePanel.Size = new Size(1475, 518);
             stagePanel.TabIndex = 0;
             stagePanel.Paint += stagePanel_Paint;
-            stagePanel.MouseClick += stagePanel_MouseClick;
             // 
             // instructionLabel
             // 
@@ -91,9 +90,9 @@ namespace ReactionTimeMeasurementApp
             instructionLabel.Location = new Point(40, 24);
             instructionLabel.Margin = new Padding(40, 24, 40, 0);
             instructionLabel.Name = "instructionLabel";
-            instructionLabel.Size = new Size(1395, 56);
+            instructionLabel.Size = new Size(1395, 84);
             instructionLabel.TabIndex = 0;
-            instructionLabel.Text = "Itt a pont megjelenése után bárhová kattinthatsz, nem kell közvetlenül az ingerre kattintani.";
+            instructionLabel.Text = "";
             instructionLabel.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // bottomBarLayout
@@ -159,45 +158,44 @@ namespace ReactionTimeMeasurementApp
             statusFlowPanel.Controls.Add(statusValueLabel);
             statusFlowPanel.Controls.Add(lastResultTitleLabel);
             statusFlowPanel.Controls.Add(lastResultValueLabel);
-            statusFlowPanel.FlowDirection = FlowDirection.TopDown;
             statusFlowPanel.Location = new Point(1225, 24);
             statusFlowPanel.Margin = new Padding(0);
             statusFlowPanel.Name = "statusFlowPanel";
+            statusFlowPanel.SetFlowBreak(statusValueLabel, true);
             statusFlowPanel.Size = new Size(223, 61);
             statusFlowPanel.TabIndex = 2;
-            statusFlowPanel.WrapContents = false;
-            // 
+            //
             // statusTitleLabel
-            // 
+            //
             statusTitleLabel.AutoSize = true;
             statusTitleLabel.Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 238);
             statusTitleLabel.ForeColor = Color.WhiteSmoke;
             statusTitleLabel.Location = new Point(0, 0);
-            statusTitleLabel.Margin = new Padding(0, 0, 0, 4);
+            statusTitleLabel.Margin = new Padding(0, 0, 6, 6);
             statusTitleLabel.Name = "statusTitleLabel";
             statusTitleLabel.Size = new Size(89, 19);
             statusTitleLabel.TabIndex = 0;
             statusTitleLabel.Text = "Folyamat állapota:";
-            // 
+            //
             // statusValueLabel
-            // 
+            //
             statusValueLabel.AutoSize = true;
             statusValueLabel.Font = new Font("Segoe UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point, 238);
             statusValueLabel.ForeColor = Color.FromArgb(205, 214, 224);
-            statusValueLabel.Location = new Point(0, 23);
-            statusValueLabel.Margin = new Padding(0, 0, 0, 10);
+            statusValueLabel.Location = new Point(95, 0);
+            statusValueLabel.Margin = new Padding(0, 0, 0, 6);
             statusValueLabel.Name = "statusValueLabel";
             statusValueLabel.Size = new Size(31, 19);
             statusValueLabel.TabIndex = 1;
             statusValueLabel.Text = "0/10";
-            // 
+            //
             // lastResultTitleLabel
-            // 
+            //
             lastResultTitleLabel.AutoSize = true;
             lastResultTitleLabel.Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 238);
             lastResultTitleLabel.ForeColor = Color.WhiteSmoke;
-            lastResultTitleLabel.Location = new Point(0, 52);
-            lastResultTitleLabel.Margin = new Padding(0, 0, 0, 4);
+            lastResultTitleLabel.Location = new Point(0, 25);
+            lastResultTitleLabel.Margin = new Padding(0, 0, 6, 0);
             lastResultTitleLabel.Name = "lastResultTitleLabel";
             lastResultTitleLabel.Size = new Size(120, 19);
             lastResultTitleLabel.TabIndex = 2;
@@ -208,7 +206,7 @@ namespace ReactionTimeMeasurementApp
             lastResultValueLabel.AutoSize = true;
             lastResultValueLabel.Font = new Font("Segoe UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point, 238);
             lastResultValueLabel.ForeColor = Color.FromArgb(205, 214, 224);
-            lastResultValueLabel.Location = new Point(0, 75);
+            lastResultValueLabel.Location = new Point(126, 25);
             lastResultValueLabel.Margin = new Padding(0);
             lastResultValueLabel.Name = "lastResultValueLabel";
             lastResultValueLabel.Size = new Size(14, 19);

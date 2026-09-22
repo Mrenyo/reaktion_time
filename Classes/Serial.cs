@@ -5,6 +5,9 @@ namespace ReactionTimeMeasurementApp.Classes
     internal sealed class Serial : IAsyncDisposable
     {
         private readonly ISerialConnection _connection;
+        private const int OpenAttemptCount = 8;
+        private static readonly TimeSpan OpenRetryDelay = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan PortStartupDelay = TimeSpan.FromMilliseconds(1500);
         private readonly List<PendingRequest> _pendingRequests = new();
         private readonly object _pendingLock = new();
 
@@ -16,7 +19,7 @@ namespace ReactionTimeMeasurementApp.Classes
 
         public bool IsRunning => _readLoopTask is { IsCompleted: false };
 
-        public static string[] GetAvailablePorts() => SystemIoSerialConnection.GetPortNames();
+        public static string GetPreferredEspPortName() => SystemIoSerialConnection.GetPreferredEspPortName();
 
         public Serial(string portName, int baudRate = 9600, Parity parity = Parity.None, int dataBits = 8, StopBits stopBits = StopBits.One)
             : this(new SystemIoSerialConnection(portName, baudRate, parity, dataBits, stopBits))
@@ -28,20 +31,39 @@ namespace ReactionTimeMeasurementApp.Classes
             _connection = connection;
         }
 
-        public Task StartAsync(CancellationToken cancellationToken = default)
+        public async Task StartAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
 
             if (IsRunning)
             {
-                return Task.CompletedTask;
+                return;
             }
 
-            _connection.Open();
+            for (var attempt = 1; ; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    _connection.Open();
+                    break;
+                }
+                catch (IOException) when (attempt < OpenAttemptCount)
+                {
+                    await Task.Delay(OpenRetryDelay, cancellationToken).ConfigureAwait(false);
+                }
+                catch (UnauthorizedAccessException) when (attempt < OpenAttemptCount)
+                {
+                    await Task.Delay(OpenRetryDelay, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            await Task.Delay(PortStartupDelay, cancellationToken).ConfigureAwait(false);
+            _connection.ClearBuffers();
+
             _readLoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _readLoopTask = Task.Run(() => ReadLoopAsync(_readLoopCts.Token), CancellationToken.None);
-
-            return Task.CompletedTask;
         }
 
         public async Task StopAsync()
@@ -265,8 +287,6 @@ namespace ReactionTimeMeasurementApp.Classes
             public bool TrySetResult(string value) => _completionSource.TrySetResult(value);
 
             public bool TrySetCanceled() => _completionSource.TrySetCanceled();
-
-            public bool TrySetException(Exception exception) => _completionSource.TrySetException(exception);
         }
     }
 
@@ -276,6 +296,8 @@ namespace ReactionTimeMeasurementApp.Classes
 
         void Close();
 
+        void ClearBuffers();
+
         Task WriteLineAsync(string payload, CancellationToken cancellationToken = default);
 
         Task<string> ReadLineAsync(CancellationToken cancellationToken = default);
@@ -284,79 +306,427 @@ namespace ReactionTimeMeasurementApp.Classes
     internal sealed class SystemIoSerialConnection : ISerialConnection
     {
         private readonly SerialPort _port;
-        private readonly System.Text.StringBuilder _buffer = new();
+        private readonly object _portLock = new();
+        private readonly SemaphoreSlim _writeLock = new(1, 1);
+        private const int IoAttemptCount = 3;
+        private static readonly TimeSpan IoRetryDelay = TimeSpan.FromMilliseconds(300);
+        private const int WriteTimeoutMilliseconds = 5000;
+        private const int EspCandidateScore = 50;
 
         public SystemIoSerialConnection(string portName, int baudRate, Parity parity, int dataBits, StopBits stopBits)
         {
             _port = new SerialPort(portName, baudRate, parity, dataBits, stopBits)
             {
                 NewLine = "\n",
-                ReadTimeout = SerialPort.InfiniteTimeout,
-                WriteTimeout = 1000,
-                Encoding = System.Text.Encoding.UTF8
+                ReadTimeout = 200,
+                WriteTimeout = SerialPort.InfiniteTimeout,
+                Encoding = System.Text.Encoding.UTF8,
+                Handshake = Handshake.None
             };
         }
 
-        public static string[] GetPortNames() => SerialPort.GetPortNames();
+        public static string GetPreferredEspPortName()
+        {
+            var candidates = GetPortCandidates();
+            if (candidates.Length == 0)
+            {
+                throw new IOException("Nem talalhato elerheto COM-port.");
+            }
+
+            var preferred = candidates.FirstOrDefault(candidate => candidate.Score >= EspCandidateScore);
+            if (preferred is not null)
+            {
+                return preferred.PortName;
+            }
+
+            if (candidates.Length == 1)
+            {
+                return candidates[0].PortName;
+            }
+
+            var availablePorts = string.Join(", ", candidates.Select(candidate => candidate.DisplayText));
+            throw new IOException(
+                $"Nem sikerult egyertelmuen azonositani az ESP COM-portjat. Elerheto portok: {availablePorts}");
+        }
+
+        private static SerialPortCandidate[] GetPortCandidates()
+        {
+            var portNames = SerialPort.GetPortNames()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(GetPortNumber)
+                .ThenBy(portName => portName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var availablePorts = new HashSet<string>(portNames, StringComparer.OrdinalIgnoreCase);
+            var candidatesByPort = portNames.ToDictionary(
+                portName => portName,
+                portName => new SerialPortCandidate(portName, string.Empty, string.Empty, 0),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var candidate in ReadRegistryPortCandidates(availablePorts))
+            {
+                if (!candidatesByPort.TryGetValue(candidate.PortName, out var existingCandidate)
+                    || candidate.Score > existingCandidate.Score)
+                {
+                    candidatesByPort[candidate.PortName] = candidate;
+                }
+            }
+
+            return candidatesByPort.Values
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => GetPortNumber(candidate.PortName))
+                .ThenBy(candidate => candidate.PortName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        private static IEnumerable<SerialPortCandidate> ReadRegistryPortCandidates(HashSet<string> availablePorts)
+        {
+            using var enumKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum");
+            if (enumKey is null)
+            {
+                yield break;
+            }
+
+            foreach (var rootName in new[] { "USB", "FTDIBUS" })
+            {
+                using var rootKey = OpenSubKeySafely(enumKey, rootName);
+                if (rootKey is null)
+                {
+                    continue;
+                }
+
+                foreach (var candidate in ReadRegistryPortCandidates(rootKey, rootName, availablePorts, 0))
+                {
+                    yield return candidate;
+                }
+            }
+        }
+
+        private static IEnumerable<SerialPortCandidate> ReadRegistryPortCandidates(
+            Microsoft.Win32.RegistryKey registryKey,
+            string hardwareId,
+            HashSet<string> availablePorts,
+            int depth)
+        {
+            if (depth > 5)
+            {
+                yield break;
+            }
+
+            string[] subKeyNames;
+            try
+            {
+                subKeyNames = registryKey.GetSubKeyNames();
+            }
+            catch (IOException)
+            {
+                yield break;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                yield break;
+            }
+            catch (System.Security.SecurityException)
+            {
+                yield break;
+            }
+
+            foreach (var subKeyName in subKeyNames)
+            {
+                using var subKey = OpenSubKeySafely(registryKey, subKeyName);
+                if (subKey is null)
+                {
+                    continue;
+                }
+
+                var childHardwareId = $"{hardwareId}\\{subKeyName}";
+                using var deviceParametersKey = OpenSubKeySafely(subKey, "Device Parameters");
+                var portName = deviceParametersKey?.GetValue("PortName") as string;
+
+                if (!string.IsNullOrWhiteSpace(portName) && availablePorts.Contains(portName))
+                {
+                    var friendlyName = GetRegistryStringValue(subKey, "FriendlyName")
+                        ?? GetRegistryStringValue(subKey, "DeviceDesc")
+                        ?? string.Empty;
+                    yield return new SerialPortCandidate(
+                        portName,
+                        friendlyName,
+                        childHardwareId,
+                        ScoreEspCandidate(friendlyName, childHardwareId));
+                }
+
+                foreach (var candidate in ReadRegistryPortCandidates(subKey, childHardwareId, availablePorts, depth + 1))
+                {
+                    yield return candidate;
+                }
+            }
+        }
+
+        private static Microsoft.Win32.RegistryKey? OpenSubKeySafely(Microsoft.Win32.RegistryKey registryKey, string subKeyName)
+        {
+            try
+            {
+                return registryKey.OpenSubKey(subKeyName);
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
+            }
+            catch (System.Security.SecurityException)
+            {
+                return null;
+            }
+        }
+
+        private static string? GetRegistryStringValue(Microsoft.Win32.RegistryKey registryKey, string valueName)
+        {
+            try
+            {
+                return registryKey.GetValue(valueName) as string;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
+            }
+            catch (System.Security.SecurityException)
+            {
+                return null;
+            }
+        }
+
+        private static int ScoreEspCandidate(string friendlyName, string hardwareId)
+        {
+            var text = $"{friendlyName} {hardwareId}".ToUpperInvariant();
+            var score = 0;
+
+            if (ContainsAny(text, "VID_303A", "ESPRESSIF", "ESP32", "ESP8266", "USB JTAG/SERIAL DEBUG UNIT"))
+            {
+                score += 100;
+            }
+
+            if (ContainsAny(text, "VID_10C4&PID_EA60", "VID_10C4&PID_EA70", "CP210", "SILICON LABS"))
+            {
+                score += 80;
+            }
+
+            if (ContainsAny(text, "VID_1A86", "VID_1A86&PID_7523", "VID_1A86&PID_55D3", "VID_1A86&PID_55D4", "CH340", "CH343", "CH344", "CH9102", "WCH"))
+            {
+                score += 80;
+            }
+
+            if (ContainsAny(text, "VID_0403", "FTDI"))
+            {
+                score += 50;
+            }
+
+            if (ContainsAny(text, "USB-SERIAL", "USB SERIAL", "USB SERIAL DEVICE", "USB-ENHANCED-SERIAL"))
+            {
+                score += 20;
+            }
+
+            if (ContainsAny(text, "BLUETOOTH"))
+            {
+                score -= 100;
+            }
+
+            return Math.Max(0, score);
+        }
+
+        private static bool ContainsAny(string text, params string[] values)
+        {
+            foreach (var value in values)
+            {
+                if (text.Contains(value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int GetPortNumber(string portName)
+        {
+            return portName.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(portName[3..], out var portNumber)
+                ? portNumber
+                : int.MaxValue;
+        }
+
+        private sealed class SerialPortCandidate
+        {
+            public SerialPortCandidate(string portName, string friendlyName, string hardwareId, int score)
+            {
+                PortName = portName;
+                FriendlyName = friendlyName;
+                HardwareId = hardwareId;
+                Score = score;
+            }
+
+            public string PortName { get; }
+
+            public string FriendlyName { get; }
+
+            public string HardwareId { get; }
+
+            public int Score { get; }
+
+            public string DisplayText => string.IsNullOrWhiteSpace(FriendlyName)
+                ? PortName
+                : $"{PortName} ({FriendlyName})";
+        }
 
         public void Open()
         {
-            if (!_port.IsOpen)
+            lock (_portLock)
             {
-                _port.Open();
+                if (!_port.IsOpen)
+                {
+                    _port.Open();
+                    TryClearBuffers();
+                }
             }
         }
 
         public void Close()
         {
-            if (_port.IsOpen)
+            lock (_portLock)
             {
-                _port.Close();
-            }
-        }
-
-        public Task WriteLineAsync(string payload, CancellationToken cancellationToken = default)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return Task.CompletedTask;
-            }
-
-            return Task.Run(() =>
-            {
-                if (!cancellationToken.IsCancellationRequested)
+                if (_port.IsOpen)
                 {
-                    _port.WriteLine(payload);
+                    _port.Close();
                 }
-            }, CancellationToken.None);
+            }
         }
 
+        public void ClearBuffers() => TryClearBuffers();
+
+        public async Task WriteLineAsync(string payload, CancellationToken cancellationToken = default)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(payload + _port.NewLine);
+
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                for (var attempt = 1; ; attempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        await WriteRawAsync(bytes, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    catch (IOException ex) when (ex is not SerialWriteTimedOutException && attempt < IoAttemptCount)
+                    {
+                        TryClearOutputBuffer();
+                        await Task.Delay(IoRetryDelay, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException) when (attempt < IoAttemptCount)
+                    {
+                        TryClearOutputBuffer();
+                        await Task.Delay(IoRetryDelay, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        throw new IOException(
+                            $"A soros port {IoAttemptCount} probalkozas utan sem tudta elkuldeni az adatot {WriteTimeoutMilliseconds} ms-os irasi idokorlattal.",
+                            ex);
+                    }
+                }
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        private async Task WriteRawAsync(byte[] bytes, CancellationToken cancellationToken)
+        {
+            Stream stream;
+
+            lock (_portLock)
+            {
+                if (!_port.IsOpen)
+                {
+                    throw new IOException("A soros port nincs megnyitva.");
+                }
+
+                stream = _port.BaseStream;
+            }
+
+            var writeTask = WriteStreamAsync(stream, bytes, cancellationToken);
+            var timeoutTask = Task.Delay(WriteTimeoutMilliseconds, cancellationToken);
+            var completedTask = await Task.WhenAny(writeTask, timeoutTask).ConfigureAwait(false);
+
+            if (completedTask == writeTask)
+            {
+                await writeTask.ConfigureAwait(false);
+                return;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Close();
+            ObserveFault(writeTask);
+
+            throw new SerialWriteTimedOutException(
+                $"A soros port {WriteTimeoutMilliseconds} ms alatt nem vette at az irando adatot, ezert a kapcsolat le lett zarva.");
+        }
+
+        private static async Task WriteStreamAsync(Stream stream, byte[] bytes, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new SerialWriteTimedOutException("A soros port stream irasa idokorlatba utkozott.", ex);
+            }
+        }
+
+        private static void ObserveFault(Task task)
+        {
+            _ = task.ContinueWith(
+                completedTask => _ = completedTask.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        // A blokkoló ReadLine (akár ReadTimeout ideig) NEM fut a _portLock alatt: különben az írás
+        // (WriteRawAsync) és a lezárás minden olvasási ciklusban akár 200 ms-ot várna, sőt ki is
+        // éhezhetne. A SerialPort egyidejű olvasást és írást megenged; ha olvasás közben zárják le
+        // a portot, a ReadLine kivételt dob, amit az alábbi catch ágak kezelnek.
         public Task<string> ReadLineAsync(CancellationToken cancellationToken = default)
         {
             return Task.Run(() =>
             {
-                while (true)
+                while (!cancellationToken.IsCancellationRequested)
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return string.Empty;
-                    }
-
                     try
                     {
-                        var incoming = _port.ReadExisting();
-                        if (!string.IsNullOrEmpty(incoming))
+                        lock (_portLock)
                         {
-                            _buffer.Append(incoming);
-                            var bufferText = _buffer.ToString();
-                            var newlineIndex = bufferText.IndexOf('\n');
-                            if (newlineIndex >= 0)
+                            if (!_port.IsOpen)
                             {
-                                var line = bufferText[..newlineIndex].TrimEnd('\r');
-                                _buffer.Remove(0, newlineIndex + 1);
-                                return line;
+                                return string.Empty;
                             }
                         }
+
+                        return _port.ReadLine().TrimEnd('\r');
+                    }
+                    catch (TimeoutException)
+                    {
                     }
                     catch (ObjectDisposedException)
                     {
@@ -366,15 +736,78 @@ namespace ReactionTimeMeasurementApp.Classes
                     {
                         return string.Empty;
                     }
-
-                    Thread.Sleep(5);
+                    catch (IOException)
+                    {
+                        Thread.Sleep(100);
+                    }
                 }
+
+                return string.Empty;
             }, CancellationToken.None);
         }
 
         public void Dispose()
         {
+            _writeLock.Dispose();
             _port.Dispose();
+        }
+
+        private void TryClearBuffers()
+        {
+            TryClearInputBuffer();
+            TryClearOutputBuffer();
+        }
+
+        private void TryClearInputBuffer()
+        {
+            try
+            {
+                lock (_portLock)
+                {
+                    if (_port.IsOpen)
+                    {
+                        _port.DiscardInBuffer();
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        private void TryClearOutputBuffer()
+        {
+            try
+            {
+                lock (_portLock)
+                {
+                    if (_port.IsOpen)
+                    {
+                        _port.DiscardOutBuffer();
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+        }
+        private sealed class SerialWriteTimedOutException : IOException
+        {
+            public SerialWriteTimedOutException(string message)
+                : base(message)
+            {
+            }
+
+            public SerialWriteTimedOutException(string message, Exception innerException)
+                : base(message, innerException)
+            {
+            }
         }
     }
 }

@@ -6,6 +6,9 @@ namespace ReactionTimeMeasurementApp
         private TableLayoutPanel rootLayout;
         private TableLayoutPanel contentLayout;
         private Label titleLabel;
+        private Panel sessionSelectorPanel;
+        private Label sessionSelectorLabel;
+        private ComboBox sessionSelectorComboBox;
         private Label measurementTypeLabel;
         private Panel separatorLine;
         private DataGridView resultsGrid;
@@ -34,6 +37,9 @@ namespace ReactionTimeMeasurementApp
             rootLayout = new TableLayoutPanel();
             contentLayout = new TableLayoutPanel();
             titleLabel = new Label();
+            sessionSelectorPanel = new Panel();
+            sessionSelectorLabel = new Label();
+            sessionSelectorComboBox = new ComboBox();
             measurementTypeLabel = new Label();
             separatorLine = new Panel();
             resultsGrid = new DataGridView();
@@ -48,6 +54,7 @@ namespace ReactionTimeMeasurementApp
             backButton = new Button();
             rootLayout.SuspendLayout();
             contentLayout.SuspendLayout();
+            sessionSelectorPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)resultsGrid).BeginInit();
             averagePanel.SuspendLayout();
             SuspendLayout();
@@ -74,19 +81,21 @@ namespace ReactionTimeMeasurementApp
             contentLayout.ColumnCount = 1;
             contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             contentLayout.Controls.Add(titleLabel, 0, 0);
-            contentLayout.Controls.Add(measurementTypeLabel, 0, 1);
-            contentLayout.Controls.Add(separatorLine, 0, 2);
-            contentLayout.Controls.Add(resultsGrid, 0, 3);
-            contentLayout.Controls.Add(averagePanel, 0, 4);
-            contentLayout.Controls.Add(backButton, 0, 5);
+            contentLayout.Controls.Add(sessionSelectorPanel, 0, 1);
+            contentLayout.Controls.Add(measurementTypeLabel, 0, 2);
+            contentLayout.Controls.Add(separatorLine, 0, 3);
+            contentLayout.Controls.Add(resultsGrid, 0, 4);
+            contentLayout.Controls.Add(averagePanel, 0, 5);
+            contentLayout.Controls.Add(backButton, 0, 6);
             contentLayout.Dock = DockStyle.Fill;
             contentLayout.Location = new Point(250, 32);
             contentLayout.Margin = new Padding(0);
-            contentLayout.RowCount = 6;
+            contentLayout.RowCount = 7;
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 10F));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 6F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 2F));
-            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 66F));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
             contentLayout.Size = new Size(973, 754);
@@ -103,9 +112,43 @@ namespace ReactionTimeMeasurementApp
             titleLabel.Size = new Size(320, 61);
             titleLabel.TabIndex = 0;
             titleLabel.Text = "Statisztika";
-            // 
+            //
+            // sessionSelectorPanel
+            //
+            sessionSelectorPanel.BackColor = Color.White;
+            sessionSelectorPanel.Controls.Add(sessionSelectorComboBox);
+            sessionSelectorPanel.Controls.Add(sessionSelectorLabel);
+            sessionSelectorPanel.Dock = DockStyle.Fill;
+            sessionSelectorPanel.Location = new Point(0, 75);
+            sessionSelectorPanel.Margin = new Padding(56, 4, 56, 4);
+            sessionSelectorPanel.Name = "sessionSelectorPanel";
+            sessionSelectorPanel.Size = new Size(861, 60);
+            sessionSelectorPanel.TabIndex = 6;
+            //
+            // sessionSelectorLabel
+            //
+            sessionSelectorLabel.AutoSize = true;
+            sessionSelectorLabel.Font = new Font("Segoe UI", 14F, FontStyle.Regular, GraphicsUnit.Point, 238);
+            sessionSelectorLabel.ForeColor = Color.FromArgb(106, 106, 114);
+            sessionSelectorLabel.Location = new Point(18, 17);
+            sessionSelectorLabel.Name = "sessionSelectorLabel";
+            sessionSelectorLabel.Size = new Size(130, 25);
+            sessionSelectorLabel.TabIndex = 0;
+            sessionSelectorLabel.Text = "Korábbi mérés:";
+            //
+            // sessionSelectorComboBox
+            //
+            sessionSelectorComboBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            sessionSelectorComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            sessionSelectorComboBox.Font = new Font("Segoe UI", 14F, FontStyle.Regular, GraphicsUnit.Point, 238);
+            sessionSelectorComboBox.FormattingEnabled = true;
+            sessionSelectorComboBox.Location = new Point(240, 13);
+            sessionSelectorComboBox.Name = "sessionSelectorComboBox";
+            sessionSelectorComboBox.Size = new Size(600, 33);
+            sessionSelectorComboBox.TabIndex = 1;
+            //
             // measurementTypeLabel
-            // 
+            //
             measurementTypeLabel.Dock = DockStyle.Fill;
             measurementTypeLabel.Font = new Font("Segoe UI", 17F, FontStyle.Regular, GraphicsUnit.Point, 238);
             measurementTypeLabel.ForeColor = Color.FromArgb(106, 106, 114);
@@ -207,18 +250,18 @@ namespace ReactionTimeMeasurementApp
             averageCaptionLabel.ForeColor = Color.FromArgb(255, 91, 24);
             averageCaptionLabel.Location = new Point(18, 11);
             averageCaptionLabel.Name = "averageCaptionLabel";
-            averageCaptionLabel.Size = new Size(74, 31);
+            averageCaptionLabel.Size = new Size(144, 31);
             averageCaptionLabel.TabIndex = 0;
-            averageCaptionLabel.Text = "Átlag";
-            // 
+            averageCaptionLabel.Text = "Összesítés";
+            //
             // averageValueLabel
-            // 
+            //
             averageValueLabel.AutoSize = true;
-            averageValueLabel.Font = new Font("Segoe UI Semibold", 17F, FontStyle.Bold, GraphicsUnit.Point, 238);
+            averageValueLabel.Font = new Font("Segoe UI Semibold", 11.5F, FontStyle.Bold, GraphicsUnit.Point, 238);
             averageValueLabel.ForeColor = Color.FromArgb(255, 91, 24);
-            averageValueLabel.Location = new Point(192, 11);
+            averageValueLabel.Location = new Point(192, 5);
             averageValueLabel.Name = "averageValueLabel";
-            averageValueLabel.Size = new Size(24, 31);
+            averageValueLabel.Size = new Size(15, 21);
             averageValueLabel.TabIndex = 1;
             averageValueLabel.Text = "-";
             // 
@@ -228,11 +271,11 @@ namespace ReactionTimeMeasurementApp
             totalTrialsLabel.AutoSize = true;
             totalTrialsLabel.Font = new Font("Segoe UI", 13F, FontStyle.Regular, GraphicsUnit.Point, 238);
             totalTrialsLabel.ForeColor = Color.FromArgb(118, 118, 126);
-            totalTrialsLabel.Location = new Point(668, 15);
+            totalTrialsLabel.Location = new Point(705, 15);
             totalTrialsLabel.Name = "totalTrialsLabel";
-            totalTrialsLabel.Size = new Size(177, 25);
+            totalTrialsLabel.Size = new Size(140, 25);
             totalTrialsLabel.TabIndex = 2;
-            totalTrialsLabel.Text = "Próbák száma: 0 / 0";
+            totalTrialsLabel.Text = "Érvényes: 0 / 0";
             // 
             // backButton
             // 
@@ -264,6 +307,8 @@ namespace ReactionTimeMeasurementApp
             contentLayout.ResumeLayout(false);
             contentLayout.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)resultsGrid).EndInit();
+            sessionSelectorPanel.ResumeLayout(false);
+            sessionSelectorPanel.PerformLayout();
             averagePanel.ResumeLayout(false);
             averagePanel.PerformLayout();
             ResumeLayout(false);

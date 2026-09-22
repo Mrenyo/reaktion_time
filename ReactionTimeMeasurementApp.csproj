@@ -8,6 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ReactionTimeMeasurementApp</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
+    <!-- Minden koordináta (inger, fotodióda, tekintet) fizikai képpontban értendő, bármelyik monitoron. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- A mérési fájlok metaadataiba kerül (AppVersion). -->
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

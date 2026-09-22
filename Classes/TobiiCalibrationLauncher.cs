@@ -38,8 +38,12 @@ internal static class TobiiCalibrationLauncher
             var result = RunProcess(executablePath, args);
             if (result.ExitCode == 0)
             {
+                Logger.Info($"Tobii kalibráció sikeres. Args: {args}");
                 return result.ExitCode;
             }
+
+            Logger.Warning(
+                $"Tobii Pro Eye Tracker Manager hiba. ExitCode={result.ExitCode} ({GetExitCodeDescription(result.ExitCode)}) Args: {args}");
 
             lastError = new InvalidOperationException(
                 $"Tobii Pro Eye Tracker Manager hiba. ExitCode={result.ExitCode} ({GetExitCodeDescription(result.ExitCode)}){Environment.NewLine}Args: {args}{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StdOut}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StdErr}");
@@ -65,12 +69,14 @@ internal static class TobiiCalibrationLauncher
 
         process.Start();
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        // A két kimenetet párhuzamosan kell olvasni: ha egymás után olvasnánk őket, és a folyamat
+        // közben megtöltené a másik (még nem olvasott) cső pufferét, mindkét fél örökre várna.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
 
         process.WaitForExit();
 
-        return (process.ExitCode, stdout, stderr);
+        return (process.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
     }
 
     private static string GetExitCodeDescription(int exitCode)

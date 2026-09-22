@@ -1,59 +1,269 @@
-﻿using Tobii.Research;
+using System.Numerics;
+using Tobii.Research;
 
 namespace ReactionTimeMeasurementApp.Classes;
 
-internal class TobiiService
+internal enum CalibrationCheckResult
 {
+    Ok,
+    TrackerNotFound,
+    NoCalibrationData,
+    NoValidGaze
+}
+
+// A Tobii-ban (Eye Tracker Manager) beállított kijelző (display area) fizikai mérete és síkja a
+// szemkövető koordináta-rendszerében (mm). Ebből adódik a kijelző valódi pixelsűrűsége, és a szem
+// távolsága a kijelző síkjától (a nézési távolság).
+internal sealed class DisplayAreaGeometry
+{
+    public DisplayAreaGeometry(DisplayArea displayArea)
+    {
+        WidthMm = displayArea.Width;
+        HeightMm = displayArea.Height;
+        _topLeft = ToVector(displayArea.TopLeft);
+        var right = ToVector(displayArea.TopRight) - _topLeft;
+        var down = ToVector(displayArea.BottomLeft) - _topLeft;
+        _normal = Vector3.Normalize(Vector3.Cross(right, down));
+    }
+
+    private readonly Vector3 _topLeft;
+    private readonly Vector3 _normal;
+
+    public double WidthMm { get; }
+
+    public double HeightMm { get; }
+
+    public bool IsValid => WidthMm > 0 && HeightMm > 0 && float.IsFinite(_normal.X);
+
+    public double DistanceToPlaneMm(Point3D point)
+    {
+        return Math.Abs(Vector3.Dot(_normal, ToVector(point) - _topLeft));
+    }
+
+    private static Vector3 ToVector(Point3D point) => new(point.X, point.Y, point.Z);
+}
+
+// A Tobii szemkövető kezelése. Az eszköz állapotát módosító metódusokat (InitializeAsync,
+// StartTracking, StopTracking, CheckExistingCalibrationAsync, Dispose) a UI-szálról kell hívni:
+// az await-ek után a folytatás is ott fut, így a "tracker" mezőt mindig ugyanaz a szál írja.
+internal sealed class TobiiService : IDisposable
+{
+    private const int InitialGazeRecordingCapacity = 1024;
+    private static readonly TimeSpan CalibrationGazeCheckDuration = TimeSpan.FromSeconds(1);
+    private const double MinValidSampleRatio = 0.5;
+
+    private readonly object _gazeRecordingLock = new();
+    private readonly object _lastGazeLock = new();
     private IEyeTracker? tracker;
-    private bool _isInitialized;
+    private Task? _initializeTask;
     private bool _isTracking;
-    private int _lastPointX;
-    private int _lastPointY;
+    private bool _disposed;
+    private PointF _lastNormalizedGaze = new(float.NaN, float.NaN);
+    private List<GazeSample>? _gazeRecording;
+
+    // A Tobii saját szálán futó GazeDataReceived is olvassa, ezért volatile.
+    private volatile DisplayAreaGeometry? _displayArea;
 
     internal bool IsTrackerAvailable => tracker != null;
 
-    internal void Initialize(bool forceRefresh = false)
+    internal DisplayAreaGeometry? DisplayArea => _displayArea;
+
+    internal string TrackerDescription => tracker is null ? "nincs" : $"{tracker.Model} (sorozatszám: {tracker.SerialNumber})";
+
+    internal double? GazeOutputFrequencyHz { get; private set; }
+
+    // Ugyanaz az óra, amin a GazeDataEventArgs.SystemTimeStamp is értendő (µs), ezért az így
+    // lekért időpontok (inger megjelenése, válasz beérkezése) közvetlenül összevethetők a
+    // tekintetminták időbélyegeivel.
+    internal long GetSystemTimeStampUs() => EyeTrackingOperations.GetSystemTimeStamp();
+
+    // Elindít egy új felvételt: innentől minden beérkező minta (az érvénytelenek is) bekerül,
+    // amíg az EndGazeRecording vagy a CancelGazeRecording le nem zárja. Egy korábbi, le nem zárt
+    // felvételt eldob.
+    internal void BeginGazeRecording()
     {
-        if (_isTracking || (_isInitialized && tracker != null && !forceRefresh))
+        lock (_gazeRecordingLock)
         {
-            return;
+            _gazeRecording = new List<GazeSample>(InitialGazeRecordingCapacity);
+        }
+    }
+
+    internal IReadOnlyList<GazeSample> EndGazeRecording()
+    {
+        lock (_gazeRecordingLock)
+        {
+            var recording = _gazeRecording;
+            _gazeRecording = null;
+            return recording is null ? Array.Empty<GazeSample>() : recording;
+        }
+    }
+
+    internal void CancelGazeRecording()
+    {
+        lock (_gazeRecordingLock)
+        {
+            _gazeRecording = null;
+        }
+    }
+
+    // Az eszközkeresés (FindAllEyeTrackers) akár másodpercekig is eltarthat, ezért aszinkron fut,
+    // hogy ne fagyassza le a felületet. Az egyszerre érkező kéréseket egyetlen keresés szolgálja ki.
+    internal Task InitializeAsync(bool forceRefresh = false)
+    {
+        if (_disposed || _isTracking || (tracker != null && !forceRefresh))
+        {
+            return Task.CompletedTask;
         }
 
+        if (_initializeTask is { IsCompleted: false })
+        {
+            return _initializeTask;
+        }
+
+        _initializeTask = InitializeCoreAsync();
+        return _initializeTask;
+    }
+
+    private async Task InitializeCoreAsync()
+    {
         try
         {
-            tracker = TryFindTracker();
-            if (tracker != null)
+            var foundTrackers = (await EyeTrackingOperations.FindAllEyeTrackersAsync()).ToList();
+            var found = foundTrackers.FirstOrDefault();
+
+            foreach (var unused in foundTrackers.Skip(1))
             {
-                Functions.Debug($"Device found: {tracker.Model}");
+                unused.Dispose();
+            }
+
+            // Ha a keresés alatt elindult a követés (vagy a szolgáltatás leállt), a meglévő
+            // eszközpéldány marad érvényben, az újonnan talált felesleges.
+            if (_isTracking || _disposed)
+            {
+                if (found != null && !ReferenceEquals(found, tracker))
+                {
+                    found.Dispose();
+                }
+
+                return;
+            }
+
+            ReplaceTracker(found);
+
+            if (found != null)
+            {
+                Logger.Info($"Tobii eszköz megtalálva: {found.Model}");
+                GazeOutputFrequencyHz = await TryReadGazeOutputFrequencyAsync(found);
+                await RefreshDisplayAreaAsync();
             }
             else
             {
-                Functions.Debug("Tobii device is not connected. Measurements will be marked invalid.");
+                Logger.Warning("Tobii eszköz nem csatlakozik.");
             }
         }
         catch (Exception e)
         {
-            Functions.Debug($"Tobii error: {e}");
+            Logger.Error("Tobii inicializálási hiba.", e);
+        }
+    }
+
+    // A display area az Eye Tracker Managerben az alkalmazás futása közben is módosulhat, ezért a
+    // mérés minden indításkor újra lekérdezi.
+    internal async Task<DisplayAreaGeometry?> RefreshDisplayAreaAsync()
+    {
+        var eyeTracker = tracker;
+        if (eyeTracker == null)
+        {
+            _displayArea = null;
+            return null;
+        }
+
+        try
+        {
+            var geometry = new DisplayAreaGeometry(await Task.Run(eyeTracker.GetDisplayArea));
+            _displayArea = geometry.IsValid ? geometry : null;
+            if (_displayArea != null)
+            {
+                Logger.Info($"Tobii display area: {geometry.WidthMm:0.0} x {geometry.HeightMm:0.0} mm.");
+            }
+        }
+        catch (Exception e)
+        {
+            Logger.Warning($"A Tobii display area nem kérdezhető le: {e.Message}");
+            _displayArea = null;
+        }
+
+        return _displayArea;
+    }
+
+    private static async Task<double?> TryReadGazeOutputFrequencyAsync(IEyeTracker eyeTracker)
+    {
+        try
+        {
+            return await Task.Run(eyeTracker.GetGazeOutputFrequency);
+        }
+        catch (Exception e)
+        {
+            Logger.Warning($"A Tobii mintavételi frekvenciája nem kérdezhető le: {e.Message}");
+            return null;
+        }
+    }
+
+    // A nézési távolság (a szem merőleges távolsága a kijelző síkjától) mediánja egy rövid felvétel
+    // alapján. Null, ha a display area nem ismert, vagy a minták kevesebb mint felében nem volt
+    // érvényes szempozíció (pl. a résztvevő nem ül a szemkövető előtt). A követésnek futnia kell.
+    internal async Task<double?> MeasureViewingDistanceAsync(TimeSpan duration)
+    {
+        if (_displayArea == null)
+        {
+            return null;
+        }
+
+        BeginGazeRecording();
+        IReadOnlyList<GazeSample> samples;
+        try
+        {
+            await Task.Delay(duration);
         }
         finally
         {
-            _isInitialized = true;
+            samples = EndGazeRecording();
+        }
+
+        var distances = samples
+            .Select(sample => sample.EyeDistanceMm)
+            .Where(float.IsFinite)
+            .OrderBy(distance => distance)
+            .ToArray();
+
+        if (samples.Count == 0 || distances.Length < samples.Count * MinValidSampleRatio)
+        {
+            return null;
+        }
+
+        var middle = distances.Length / 2;
+        return distances.Length % 2 == 1
+            ? distances[middle]
+            : (distances[middle - 1] + distances[middle]) / 2d;
+    }
+
+    // A lecserélt eszközpéldányt fel kell szabadítani, különben a natív kapcsolata nyitva marad.
+    private void ReplaceTracker(IEyeTracker? newTracker)
+    {
+        var previous = tracker;
+        tracker = newTracker;
+
+        if (previous != null && !ReferenceEquals(previous, newTracker))
+        {
+            _displayArea = null;
+            GazeOutputFrequencyHz = null;
+            previous.Dispose();
         }
     }
 
     internal void StartTracking()
     {
-        if (_isTracking)
-        {
-            return;
-        }
-
-        if (!_isInitialized)
-        {
-            Initialize();
-        }
-
-        if (tracker == null)
+        if (_isTracking || tracker == null)
         {
             return;
         }
@@ -64,12 +274,7 @@ internal class TobiiService
 
     internal void StopTracking()
     {
-        if (!_isTracking)
-        {
-            return;
-        }
-
-        if (tracker == null)
+        if (!_isTracking || tracker == null)
         {
             return;
         }
@@ -78,32 +283,89 @@ internal class TobiiService
         _isTracking = false;
     }
 
+    // Háttérszálról (Task.Run) is hívható: csak olvassa a "tracker" mezőt, nem cseréli le. Előtte
+    // az InitializeAsync-kal kell gondoskodni róla, hogy a legfrissebb eszközpéldány legyen meg.
     internal int RunUserCalibration(int? screenNumber = null)
     {
-        var eyeTracker = TryFindTracker();
+        var eyeTracker = tracker;
         if (eyeTracker == null)
         {
-            Functions.Debug("Calibration skipped: Tobii device is not connected.");
+            Logger.Warning("Kalibráció kihagyva: Tobii eszköz nem csatlakozik.");
             return -1;
         }
 
         return TobiiCalibrationLauncher.RunUserCalibration(eyeTracker, screenNumber);
     }
 
-    private IEyeTracker? TryFindTracker()
+    // A "meglévő kalibráció" használata előtt ellenőrzi, hogy (1) csatlakozik-e szemkövető,
+    // (2) van-e rajta alkalmazott kalibráció, és (3) érkezik-e tőle ténylegesen érvényes
+    // tekintetadat, vagyis a résztvevő a szemkövető előtt ül, és az eszköz követi a szemét.
+    internal async Task<(CalibrationCheckResult Result, double ValidGazeRatio)> CheckExistingCalibrationAsync()
     {
-        var trackers = EyeTrackingOperations.FindAllEyeTrackers().ToList();
-        tracker = trackers.FirstOrDefault();
-        return tracker;
+        await InitializeAsync(forceRefresh: true);
+
+        var eyeTracker = tracker;
+        if (eyeTracker == null)
+        {
+            return (CalibrationCheckResult.TrackerNotFound, 0);
+        }
+
+        if (!await HasCalibrationDataAsync(eyeTracker))
+        {
+            return (CalibrationCheckResult.NoCalibrationData, 0);
+        }
+
+        var startedTracking = !_isTracking;
+        StartTracking();
+        BeginGazeRecording();
+
+        IReadOnlyList<GazeSample> samples;
+        try
+        {
+            await Task.Delay(CalibrationGazeCheckDuration);
+        }
+        finally
+        {
+            samples = EndGazeRecording();
+            if (startedTracking)
+            {
+                StopTracking();
+            }
+        }
+
+        var validRatio = samples.Count == 0 ? 0 : samples.Count(sample => sample.IsValid) / (double)samples.Count;
+        Logger.Info($"Kalibráció-ellenőrzés: {samples.Count} tekintetminta, érvényes arány {validRatio:P0}.");
+
+        return validRatio >= MinValidSampleRatio
+            ? (CalibrationCheckResult.Ok, validRatio)
+            : (CalibrationCheckResult.NoValidGaze, validRatio);
+    }
+
+    private static async Task<bool> HasCalibrationDataAsync(IEyeTracker eyeTracker)
+    {
+        try
+        {
+            var calibrationData = await Task.Run(eyeTracker.RetrieveCalibrationData);
+            return calibrationData?.Data is { Length: > 0 };
+        }
+        catch (Exception e)
+        {
+            // Nem minden eszköz vagy licenc engedi a kalibrációs adat kiolvasását; ilyenkor
+            // egyedül a tekintetadat ellenőrzése dönt.
+            Logger.Warning($"A kalibrációs adat nem olvasható ki, csak a tekintetadat ellenőrzése dönt: {e.Message}");
+            return true;
+        }
     }
 
     private void Tracker_GazeDataReceived(object? sender, GazeDataEventArgs e)
     {
         var leftValid = e.LeftEye.GazePoint.Validity == Validity.Valid;
         var rightValid = e.RightEye.GazePoint.Validity == Validity.Valid;
+        var eyeDistanceMm = ComputeEyeDistanceMm(e);
 
         if (!leftValid && !rightValid)
         {
+            RecordGazeSample(new GazeSample(e.SystemTimeStamp, float.NaN, float.NaN, false, false, eyeDistanceMm));
             return;
         }
 
@@ -128,18 +390,87 @@ internal class TobiiService
             y = e.RightEye.GazePoint.PositionOnDisplayArea.Y;
         }
 
-        var screenBounds = Screen.PrimaryScreen?.Bounds ?? Rectangle.Empty;
-        var pixelX = (int)(x * screenBounds.Width);
-        var pixelY = (int)(y * screenBounds.Height);
+        RecordGazeSample(new GazeSample(e.SystemTimeStamp, x, y, leftValid, rightValid, eyeDistanceMm));
 
-        Interlocked.Exchange(ref _lastPointX, pixelX);
-        Interlocked.Exchange(ref _lastPointY, pixelY);
+        lock (_lastGazeLock)
+        {
+            _lastNormalizedGaze = new PointF(x, y);
+        }
     }
 
-    internal Point GetGazePoint()
+    // A két szem (ha érvényes) átlagos merőleges távolsága a kijelző síkjától, mm-ben.
+    private float ComputeEyeDistanceMm(GazeDataEventArgs e)
     {
+        var displayArea = _displayArea;
+        if (displayArea == null)
+        {
+            return float.NaN;
+        }
+
+        var sum = 0d;
+        var count = 0;
+        foreach (var eye in new[] { e.LeftEye, e.RightEye })
+        {
+            if (eye.GazeOrigin.Validity == Validity.Valid)
+            {
+                sum += displayArea.DistanceToPlaneMm(eye.GazeOrigin.PositionInUserCoordinates);
+                count++;
+            }
+        }
+
+        return count == 0 ? float.NaN : (float)(sum / count);
+    }
+
+    // A Tobii SDK saját szálán fut (GazeDataReceived), ezért a felvétel zárolva bővül.
+    private void RecordGazeSample(GazeSample sample)
+    {
+        lock (_gazeRecordingLock)
+        {
+            _gazeRecording?.Add(sample);
+        }
+    }
+
+    // A legutóbbi érvényes tekintetpont képernyő-koordinátákban. A screenBounds annak a kijelzőnek
+    // a területe, amelyre a Tobii display area be van állítva (a mérést futtató kijelző).
+    internal Point GetGazePoint(Rectangle screenBounds)
+    {
+        PointF normalized;
+        lock (_lastGazeLock)
+        {
+            normalized = _lastNormalizedGaze;
+        }
+
+        if (!float.IsFinite(normalized.X) || !float.IsFinite(normalized.Y))
+        {
+            return new Point(int.MinValue / 2, int.MinValue / 2);
+        }
+
         return new Point(
-            Volatile.Read(ref _lastPointX),
-            Volatile.Read(ref _lastPointY));
+            (int)(screenBounds.Left + (normalized.X * screenBounds.Width)),
+            (int)(screenBounds.Top + (normalized.Y * screenBounds.Height)));
+    }
+
+    // Az alkalmazás bezárásakor hívandó: leállítja a követést, felszabadítja az eszközt, és a
+    // Tobii SDK ajánlása szerint lezárja az SDK natív erőforrásait.
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        StopTracking();
+        CancelGazeRecording();
+        ReplaceTracker(null);
+        _disposed = true;
+
+        try
+        {
+            EyeTrackingOperations.Terminate();
+        }
+        catch (Exception e)
+        {
+            Logger.Warning($"A Tobii SDK lezárása sikertelen: {e.Message}");
+        }
     }
 }

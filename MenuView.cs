@@ -8,7 +8,6 @@ public partial class MenuView : UserControl
     private Bitmap? _generatedBackgroundCache;
     private readonly Dictionary<PictureBox, Image> _menuImageSources = new();
     private Size _generatedBackgroundCacheSize = Size.Empty;
-    private string _currentSection = "Kalibráció";
     private bool _isCalibrationCompleted;
     private MeasureMode _selectedMeasureMode = MeasureMode.Normal;
 
@@ -24,7 +23,7 @@ public partial class MenuView : UserControl
         ConfigureNavigationCards();
         ConfigureRoundedSurfaces();
         LoadMenuImages();
-        _ = ViewBackgroundStyler.TryGetScaledBackground(ClientSize);
+        _ = ViewBackgroundStyler.TryLoadBackground();
         SetCalibrationCompleted(false);
         SelectMeasureMode(MeasureMode.Normal);
         SelectSection("Kalibráció");
@@ -166,8 +165,9 @@ public partial class MenuView : UserControl
         var sourceImage = UiResourceCache.TryGetImage(assetPath);
         if (sourceImage is null)
         {
+            // Ha a képfájl hiányzik, a kódból rajzolt tartalék illusztráció jelenik meg helyette.
             pictureBox.Visible = false;
-            fallbackControl.Visible = false;
+            fallbackControl.Visible = true;
             return;
         }
 
@@ -382,7 +382,6 @@ public partial class MenuView : UserControl
 
     private void SelectSection(string sectionName)
     {
-        _currentSection = sectionName;
         ResetCardStyles();
 
         switch (sectionName)

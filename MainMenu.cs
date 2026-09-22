@@ -1,5 +1,4 @@
 using ReactionTimeMeasurementApp.Classes;
-using System.Reflection;
 
 namespace ReactionTimeMeasurementApp;
 
@@ -14,7 +13,6 @@ public partial class MainMenu : Form
         Statistics
     }
 
-    private const bool DEV = false;
     private const int GazeCircleDiameterPx = 60;
     private const int GazeRefreshIntervalMs = 16;
     private const float GazeSmoothingFactor = 0.6f;
@@ -24,7 +22,11 @@ public partial class MainMenu : Form
     private readonly Dictionary<ViewKey, Control> _viewCache = new();
 
     private readonly TobiiService tobiiService;
-    private readonly bool _devMode = DEV;
+
+    // A gaze-overlay (a szemkövető aktuális nézési pontját mutató kör) fejlesztői segédeszköz;
+    // futásidőben a --dev kapcsolóval vagy a REACTIONTIME_DEV_MODE környezeti változóval
+    // kapcsolható be, lásd DeveloperMode.
+    private readonly bool _devMode = DeveloperMode.IsEnabled;
     private readonly System.Windows.Forms.Timer _gazeTimer = new();
     private readonly System.Windows.Forms.Timer _viewPreloadTimer = new();
     private readonly Queue<ViewKey> _viewPreloadQueue = new();
@@ -36,6 +38,9 @@ public partial class MainMenu : Form
     private PointF _smoothedGazePoint;
     private bool _hasSmoothedGazePoint;
     private MeasurementSessionResult? _latestSession;
+    private bool _isFullScreen;
+    private FormWindowState _windowStateBeforeFullScreen;
+    private Rectangle _boundsBeforeFullScreen;
 
     public MainMenu()
     {
@@ -72,7 +77,7 @@ public partial class MainMenu : Form
     private void InitializeViews()
     {
         contentHostPanel.SuspendLayout();
-        EnableDoubleBuffer(contentHostPanel);
+        contentHostPanel.EnableDoubleBuffering();
         contentHostPanel.BackColor = Color.FromArgb(253, 250, 250);
         ConfigureTransitionCover();
         contentHostPanel.ResumeLayout(true);
@@ -233,7 +238,7 @@ public partial class MainMenu : Form
         view.Dock = DockStyle.Fill;
         view.Margin = Padding.Empty;
         view.Visible = false;
-        EnableDoubleBuffer(view);
+        view.EnableDoubleBuffering();
         return view;
     }
 
@@ -253,6 +258,9 @@ public partial class MainMenu : Form
             return;
         }
 
+        // Még a nézetváltás (és az elrendezés felfüggesztése) előtt, hogy a nézet már a végleges
+        // méretet kapja.
+        SetFullScreen(view is MeasurementViewBase);
         ShowTransitionCover();
         using var redrawScope = UiRedrawScope.Suspend(contentHostPanel);
         contentHostPanel.SuspendLayout();
@@ -290,6 +298,47 @@ public partial class MainMenu : Form
         ScheduleTransitionCoverHide();
     }
 
+    // A mérési nézetek keret nélküli teljes képernyőn futnak (címsor és tálca nélkül), hogy semmi ne
+    // vonja el a résztvevő figyelmét. A fotodióda-jelző helye ehhez a teljes képernyős elrendezéshez
+    // igazodik, ezért a mérési nézet már megnyitáskor (nem csak a mérés indításakor) teljes képernyős.
+    private void SetFullScreen(bool fullScreen)
+    {
+        if (_isFullScreen == fullScreen)
+        {
+            return;
+        }
+
+        _isFullScreen = fullScreen;
+        if (fullScreen)
+        {
+            _windowStateBeforeFullScreen = WindowState;
+            _boundsBeforeFullScreen = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            var screen = Screen.FromControl(this);
+            FormBorderStyle = FormBorderStyle.None;
+            WindowState = FormWindowState.Normal;
+            Bounds = screen.Bounds;
+        }
+        else
+        {
+            FormBorderStyle = FormBorderStyle.Sizable;
+            Bounds = _boundsBeforeFullScreen;
+            WindowState = _windowStateBeforeFullScreen == FormWindowState.Minimized
+                ? FormWindowState.Maximized
+                : _windowStateBeforeFullScreen;
+        }
+    }
+
+    // Esc: a futó mérés megszakítása (az eddigi próbák mentve maradnak).
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape && _activeView is MeasurementViewBase measurementView && measurementView.TryAbortMeasurement())
+        {
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     private void InitializeGazeOverlay()
     {
         contentHostPanel.Controls.Add(_gazeCircle);
@@ -299,17 +348,30 @@ public partial class MainMenu : Form
         _gazeCircle.Visible = false;
         _gazeCircle.BringToFront();
 
-        tobiiService.Initialize();
-        tobiiService.StartTracking();
+        _ = StartGazeOverlayTrackingAsync();
 
         _gazeTimer.Interval = GazeRefreshIntervalMs;
         _gazeTimer.Tick += (_, _) => UpdateGazeCirclePosition();
         _gazeTimer.Start();
     }
 
+    // Az eszközkeresés aszinkron, így nem késlelteti az ablak megjelenését.
+    private async Task StartGazeOverlayTrackingAsync()
+    {
+        try
+        {
+            await tobiiService.InitializeAsync();
+            tobiiService.StartTracking();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("A fejlesztői tekintet-overlay követésének indítása sikertelen.", ex);
+        }
+    }
+
     private void UpdateGazeCirclePosition()
     {
-        var screenPoint = tobiiService.GetGazePoint();
+        var screenPoint = tobiiService.GetGazePoint(Screen.FromControl(this).Bounds);
         var clientPoint = contentHostPanel.PointToClient(screenPoint);
 
         if (!_hasSmoothedGazePoint)
@@ -335,13 +397,6 @@ public partial class MainMenu : Form
         }
     }
 
-    private static void EnableDoubleBuffer(Control control)
-    {
-        typeof(Control)
-            .GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.SetValue(control, true);
-    }
-
     private void AddViewToHost(Control view)
     {
         contentHostPanel.SuspendLayout();
@@ -362,6 +417,12 @@ public partial class MainMenu : Form
         }
 
         base.OnFormClosing(e);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        tobiiService.Dispose();
+        base.OnFormClosed(e);
     }
 }
 

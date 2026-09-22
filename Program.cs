@@ -1,10 +1,16 @@
-﻿namespace ReactionTimeMeasurementApp;
+﻿using ReactionTimeMeasurementApp.Classes;
+
+namespace ReactionTimeMeasurementApp;
 
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        Logger.Info("Alkalmazás indul.");
+        Logger.Info($"Adatmappa (mérések, beállítások, napló): {DataLocations.RootDirectory}");
+        DeveloperMode.Initialize(args);
+
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, eventArgs) =>
@@ -24,6 +30,10 @@ static class Program
         catch (Exception ex)
         {
             ErrorPopup.ShowGeneral(null, ex);
+        }
+        finally
+        {
+            Logger.Info("Alkalmazás bezárva.");
         }
     }
 }

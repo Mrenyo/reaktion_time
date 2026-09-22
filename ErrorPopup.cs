@@ -1,3 +1,5 @@
+using ReactionTimeMeasurementApp.Classes;
+
 namespace ReactionTimeMeasurementApp;
 
 internal static class ErrorPopup
@@ -22,16 +24,83 @@ internal static class ErrorPopup
             MessageBoxIcon.Warning);
     }
 
-    internal static void ShowEspNotConnected(Control? owner, string portName, Exception? exception = null)
+    internal static void ShowSettingsError(Control? owner, string settingsPath, string details)
     {
-        var message = $"Az ESP nem érhető el a(z) {portName} porton. Ellenőrizd a csatlakozást, majd próbáld újra.";
-        Show(owner, AppendDetails(message, exception), "ESP kapcsolati hiba", MessageBoxIcon.Error);
+        Show(
+            owner,
+            $"A mérési beállítások hibásak, ezért a mérés nem indul el. Javítsd a fájlt, majd próbáld újra."
+            + $"{Environment.NewLine}{Environment.NewLine}Fájl: {settingsPath}{Environment.NewLine}{Environment.NewLine}{details}",
+            "Hibás mérési beállítások",
+            MessageBoxIcon.Error);
     }
 
+    internal static void ShowMeasurementSetupError(Control? owner, string details)
+    {
+        Show(owner, details, "A mérés nem indítható", MessageBoxIcon.Error);
+    }
+
+    internal static void ShowSaveFailed(Control? owner, string path, Exception exception)
+    {
+        Show(
+            owner,
+            AppendDetails(
+                $"A mérési adatok mentése nem sikerült, ezért a mérés leáll (a már kiírt próbák megmaradnak).{Environment.NewLine}{Environment.NewLine}Hely: {path}",
+                exception),
+            "Mentési hiba",
+            MessageBoxIcon.Error,
+            exception);
+    }
+
+    internal static void ShowCalibrationMissing(Control? owner)
+    {
+        Show(
+            owner,
+            "A szemkövetőn nincs használható kalibráció. Végezz újrakalibrálást.",
+            "Nincs kalibráció",
+            MessageBoxIcon.Warning);
+    }
+
+    internal static void ShowGazeNotDetected(Control? owner, double validGazeRatio)
+    {
+        Show(
+            owner,
+            $"A szemkövető nem érzékel érvényes tekintetet (érvényes minták aránya: {validGazeRatio:P0}). "
+            + "Ülj a szemkövető elé, nézz a képernyőre, majd próbáld újra. Ha így sem sikerül, végezz újrakalibrálást.",
+            "Nem érzékelhető tekintet",
+            MessageBoxIcon.Warning);
+    }
+
+    internal static void ShowEspNotConnected(Control? owner, string portName, Exception? exception = null)
+    {
+        if (IsPortBusyError(exception))
+        {
+            var busyMessage = $"A(z) {portName} port foglalt, ezert az alkalmazas nem tudja megnyitni. Zard be a Serial Monitort, PlatformIO/Arduino monitort, vagy a masik futo alkalmazaspeldanyt, majd probald ujra.";
+            Show(owner, AppendDetails(busyMessage, exception), "COM port foglalt", MessageBoxIcon.Error, exception);
+            return;
+        }
+
+        var message = $"Az ESP nem erheto el a(z) {portName} porton. Ellenorizd a csatlakozast, majd probald ujra.";
+        Show(owner, AppendDetails(message, exception), "ESP kapcsolati hiba", MessageBoxIcon.Error, exception);
+    }
+
+    internal static void ShowEspCommunicationError(Control? owner, string portName, int baudRate, Exception? exception = null)
+    {
+        var message = $"Az ESP a(z) {portName} porton megnyilt, de nem sikerult ervenyes adatot valtani vele. Ellenorizd, hogy az ESP firmware {baudRate} baudon fut-e, es a numerikus scanout protokollt hasznalja-e.";
+        Show(owner, AppendDetails(message, exception), "ESP kommunikacios hiba", MessageBoxIcon.Error, exception);
+    }
     internal static void ShowGeneral(Control? owner, Exception? exception = null)
     {
         const string message = "Váratlan hiba történt. Próbáld újra, vagy indítsd újra az alkalmazást.";
-        Show(owner, AppendDetails(message, exception), GeneralTitle, MessageBoxIcon.Error);
+        Show(owner, AppendDetails(message, exception), GeneralTitle, MessageBoxIcon.Error, exception);
+    }
+
+    private static bool IsPortBusyError(Exception? exception)
+    {
+        return exception is UnauthorizedAccessException
+            || exception?.InnerException is UnauthorizedAccessException
+            || exception?.Message.Contains("denied", StringComparison.OrdinalIgnoreCase) == true
+            || exception?.Message.Contains("hozzaferes", StringComparison.OrdinalIgnoreCase) == true
+            || exception?.Message.Contains("hozzáférés", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string AppendDetails(string message, Exception? exception)
@@ -41,11 +110,30 @@ internal static class ErrorPopup
             : $"{message}{Environment.NewLine}{Environment.NewLine}Részletek: {exception.Message}";
     }
 
-    private static void Show(Control? owner, string message, string title, MessageBoxIcon icon)
+    private static void Show(Control? owner, string message, string title, MessageBoxIcon icon, Exception? exception = null)
+    {
+        // Minden felhasználó felé megjelenő hibaüzenetet itt naplózunk egy helyen, a teljes
+        // kivétellel (stack trace-szel) együtt - így egy résztvevőnél tapasztalt hiba utólag,
+        // a "logs" mappában is visszakereshető, nemcsak a felugró ablak rövid szövegében.
+        // Ez a metódus csak egyszer fut le hívásonként; a UI-szálra váltást a ShowMessageBox
+        // végzi, hogy az átirányítás miatt ne naplózzunk kétszer ugyanarról a hibáról.
+        if (icon == MessageBoxIcon.Error)
+        {
+            Logger.Error($"[{title}] {message}", exception);
+        }
+        else
+        {
+            Logger.Warning($"[{title}] {message}");
+        }
+
+        ShowMessageBox(owner, message, title, icon);
+    }
+
+    private static void ShowMessageBox(Control? owner, string message, string title, MessageBoxIcon icon)
     {
         if (owner is { IsDisposed: false, IsHandleCreated: true } && owner.InvokeRequired)
         {
-            owner.BeginInvoke(new Action(() => Show(owner, message, title, icon)));
+            owner.BeginInvoke(new Action(() => ShowMessageBox(owner, message, title, icon)));
             return;
         }
 

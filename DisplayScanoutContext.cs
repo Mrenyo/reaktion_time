@@ -1,29 +1,36 @@
-using System.Runtime.InteropServices;
 using ReactionTimeMeasurementApp.Classes;
 
 namespace ReactionTimeMeasurementApp;
 
 internal static class DisplayScanoutContext
 {
+    // Az inger és a fotodióda-jelző ugyanarra a felületre (surface) rajzolódik, ezért mindkét
+    // téglalap ennek a felületnek a kliens-koordinátáiban értendő. A képidőzítést a mérés elején
+    // egyszer kérdezzük le (DisplayTimingReader), és minden próbánál azt használjuk.
     internal static ScanoutTrialParameters Capture(
-        Control stimulusSurface,
+        Control surface,
         RectangleF stimulusBounds,
-        Control photodiodeIndicator)
+        RectangleF photodiodeBounds,
+        DisplayTiming timing)
     {
         if (stimulusBounds.Width <= 0 || stimulusBounds.Height <= 0)
         {
             throw new InvalidOperationException("Az inger pozíciója még nincs előkészítve.");
         }
 
-        var stimulusSurfaceOrigin = stimulusSurface.PointToScreen(Point.Empty);
-        var stimulusCenter = new Point(
-            (int)Math.Round(stimulusSurfaceOrigin.X + stimulusBounds.Left + (stimulusBounds.Width / 2d)),
-            (int)Math.Round(stimulusSurfaceOrigin.Y + stimulusBounds.Top + (stimulusBounds.Height / 2d)));
+        if (photodiodeBounds.Width <= 0 || photodiodeBounds.Height <= 0)
+        {
+            throw new InvalidOperationException("A fotodióda-jelző nem fér el a mérőfelületen.");
+        }
 
-        var photodiodeOrigin = photodiodeIndicator.PointToScreen(Point.Empty);
+        var surfaceOrigin = surface.PointToScreen(Point.Empty);
+        var stimulusCenter = new Point(
+            (int)Math.Round(surfaceOrigin.X + stimulusBounds.Left + (stimulusBounds.Width / 2d)),
+            (int)Math.Round(surfaceOrigin.Y + stimulusBounds.Top + (stimulusBounds.Height / 2d)));
+
         var photodiodeCenter = new Point(
-            photodiodeOrigin.X + (photodiodeIndicator.Width / 2),
-            photodiodeOrigin.Y + (photodiodeIndicator.Height / 2));
+            (int)Math.Round(surfaceOrigin.X + photodiodeBounds.Left + (photodiodeBounds.Width / 2d)),
+            (int)Math.Round(surfaceOrigin.Y + photodiodeBounds.Top + (photodiodeBounds.Height / 2d)));
 
         var stimulusScreen = Screen.FromPoint(stimulusCenter);
         var photodiodeScreen = Screen.FromPoint(photodiodeCenter);
@@ -36,84 +43,11 @@ internal static class DisplayScanoutContext
             stimulusCenter.Y - stimulusScreen.Bounds.Top,
             photodiodeCenter.Y - stimulusScreen.Bounds.Top,
             stimulusScreen.Bounds.Height,
-            DisplayRefreshRate.GetHertz(stimulusScreen));
+            timing.RefreshRateHz,
+            timing.VerticalActiveLines,
+            timing.VerticalTotalLines);
 
         parameters.Validate();
         return parameters;
-    }
-}
-
-internal static class DisplayRefreshRate
-{
-    private const int EnumCurrentSettings = -1;
-
-    internal static double GetHertz(Screen screen)
-    {
-        var mode = DevMode.Create();
-        if (!EnumDisplaySettings(screen.DeviceName, EnumCurrentSettings, ref mode)
-            || mode.DisplayFrequency <= 1)
-        {
-            throw new InvalidOperationException(
-                $"Nem határozható meg a(z) {screen.DeviceName} kijelző képfrissítési frekvenciája.");
-        }
-
-        return mode.DisplayFrequency;
-    }
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplaySettings(
-        string deviceName,
-        int modeNumber,
-        ref DevMode deviceMode);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DevMode
-    {
-        private const int DeviceNameLength = 32;
-        private const int FormNameLength = 32;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = DeviceNameLength)]
-        public string DeviceName;
-        public ushort SpecVersion;
-        public ushort DriverVersion;
-        public ushort Size;
-        public ushort DriverExtra;
-        public uint Fields;
-        public int PositionX;
-        public int PositionY;
-        public uint DisplayOrientation;
-        public uint DisplayFixedOutput;
-        public short Color;
-        public short Duplex;
-        public short YResolution;
-        public short TTOption;
-        public short Collate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = FormNameLength)]
-        public string FormName;
-        public ushort LogPixels;
-        public uint BitsPerPel;
-        public uint PelsWidth;
-        public uint PelsHeight;
-        public uint DisplayFlags;
-        public uint DisplayFrequency;
-        public uint IcmMethod;
-        public uint IcmIntent;
-        public uint MediaType;
-        public uint DitherType;
-        public uint Reserved1;
-        public uint Reserved2;
-        public uint PanningWidth;
-        public uint PanningHeight;
-
-        public static DevMode Create()
-        {
-            return new DevMode
-            {
-                DeviceName = string.Empty,
-                FormName = string.Empty,
-                Size = (ushort)Marshal.SizeOf<DevMode>()
-            };
-        }
     }
 }

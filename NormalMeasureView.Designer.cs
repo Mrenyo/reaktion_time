@@ -68,7 +68,6 @@
             stagePanel.Size = new Size(1448, 546);
             stagePanel.TabIndex = 0;
             stagePanel.Paint += NormalMeasureView_Paint;
-            stagePanel.MouseClick += stagePanel_MouseClick;
             // 
             // instructionLabel
             // 
@@ -79,7 +78,7 @@
             instructionLabel.Location = new Point(40, 24);
             instructionLabel.Margin = new Padding(40, 24, 40, 0);
             instructionLabel.Name = "instructionLabel";
-            instructionLabel.Size = new Size(1368, 56);
+            instructionLabel.Size = new Size(1368, 84);
             instructionLabel.TabIndex = 0;
             instructionLabel.Text = resources.GetString("instructionLabel.Text");
             instructionLabel.TextAlign = ContentAlignment.MiddleCenter;
