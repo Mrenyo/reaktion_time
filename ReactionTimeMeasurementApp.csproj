@@ -16,18 +16,9 @@
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="9.0.0" />
-    <Reference Include="Tobii.Research">
-      <HintPath>SDK\Tobii.Research.x64.2.1.0.1\lib\netstandard2.0\Tobii.Research.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="SDK\Tobii.Research.x64.2.1.0.1\runtimes\win-x64\native\tobii_pro.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="SDK\Tobii.Research.x64.2.1.0.1\runtimes\win-x64\native\tobii_firmware_upgrade.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <!-- A Tobii Pro SDK a nuget.org-ról jön (a csomag a natív tobii_pro.dll-t is az exe mellé másolja).
+         A csomag licence (requireLicenseAcceptance) csak nem kereskedelmi kutatási célú használatot enged. -->
+    <PackageReference Include="Tobii.Research.x64" Version="2.1.0.1" />
   </ItemGroup>
 
   <ItemGroup>
