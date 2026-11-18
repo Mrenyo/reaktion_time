@@ -1,0 +1,15 @@
+# Összefoglalás
+
+A dolgozat célja egy olyan, vizuális ingerekre épülő reakcióidőmérő rendszer bemutatása volt, amely a hagyományos, kizárólag PC-s időbélyegekre épülő megoldások korlátait hardverközeli mérési pontokkal csökkenti. A kiinduló probléma az volt, hogy a program által kezdeményezett megjelenítés nem azonos a kijelzőn látható fizikai ingerrel, és a PC által fogadott egéresemény sem azonos a kattintás tényleges elektromos kezdetével.
+
+Az irodalmi áttekintés bemutatta a reakcióidő fogalmát, a vizuális reakcióidő tipikus értelmezési tartományait, a megjelenítési és inputoldali késleltetések szerepét, a szoftveres időzítés korlátait, valamint a false-pozitív reakcióidőmérés problémáját. A feldolgozás alapján a technikai késleltetés nem egyszerűen zavaró mellékhatás, hanem a mérés értelmezését közvetlenül befolyásoló tényező.
+
+A megvalósított rendszer központi eleme az ESP32-S3 N16R8 alapú időmérő egység, amelynek firmware-e ESP-IDF keretrendszerben készült. A mérést egy processzormaghoz rögzített feladat végzi: a fotodióda jelét mintavételezi, a gombjelet megszakítással és folyamatos olvasással figyeli, a két eseményt ugyanazon a mikroszekundumos órán időbélyegzi, és a reakcióidőt helyben számítja ki. A fotodióda transzimpedancia-erősítőn, az egérgomb jele illesztő áramkörön keresztül csatlakozik; az elektronika nyomtatott áramkörre és 3D nyomtatott dobozba került, a fotodiódát állítható befogó tartja a kijelzőn.
+
+A rendszer a kijelzőn belüli megjelenési eltérést scanout-korrekcióval kezeli. A korrekciót a PC-s alkalmazás számítja az inger és a jelző sorkülönbségéből, a kijelző pontos képidőzítésének (tört frissítési frekvencia, holtidős sorok, skálázás) figyelembevételével, és próbánként elküldi az időmérő egységnek.
+
+A PC-s .NET alkalmazás a mérési folyamat vezérlését, az ESP-vel folytatott soros kommunikációt, a próbák érvényességének eldöntését, az adatok tárolását és a statisztikai összefoglalást látja el. A program rétegzett felépítésű, a mérés logikája a felülettől és a hardvertől függetlenül ellenőrizhető. A mérés paraméterei – a próbák száma, az időzítés, az inger megjelenése, a válasz módja és a tekintet-ellenőrzés módja – szabadon beállíthatók. A Tobii szemmozgáskövetés validációs rétegként szerepel: segít eldönteni, hogy a normál vagy a periférikus mérés próbája viselkedési szempontból érvényes volt-e.
+
+A fejlesztés közben rögzített mérésekben a szoftveres időbélyegekből számított reakcióidő minden próbában hosszabb volt a hardveresen mértnél, átlagosan 43,1 ms-mal, 8,1 ms-os szórással. Ez megerősíti a TMDK-dolgozatban közölt eredményt, és megmutatja, hogy a szoftveres mérés hibájának változó része sem elhanyagolható.
+
+A dolgozat konklúziója, hogy a reakcióidőmérés megbízhatósága a mérési végpontok helyes kijelölésével javítható. A bemutatott rendszerben az inger kezdete, a válasz kezdete és a próba érvényessége elkülönített mérési rétegekben jelenik meg. A rendszer pontosságára vonatkozó állítások teljes körű igazolásához a 7. fejezetben leírt célzott mérések szükségesek; ezek elvégzése után a rendszer megfelelő alapot ad további mérési sorozatokhoz.

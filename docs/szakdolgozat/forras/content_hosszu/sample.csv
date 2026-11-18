@@ -1,0 +1,28 @@
+# FormatVersion=3
+# ModeName=Mérés tekintet-ellenőrzés nélkül
+# StartedAt=2026-11-09T18:58:42.3212824+01:00
+# AppVersion=2.0.0+04968c7d44129f0f091125115334f829b1d262e6
+# Tracker=nincs
+# SerialPort=COM5
+# ScreenResolutionPx=1920x1080
+# RefreshRateHz=74.9725
+# VerticalActiveLines=1080
+# VerticalTotalLines=1119
+# ScanoutTimingSource=QueryDisplayConfig
+# PhotodiodeMarkerStagePx=1864,980,56,56
+# MeasuredTrials=15
+# PracticeTrials=2
+# ResponseMode=ClickAnywhere
+# RandomSeed=494746889
+# StimulusColor=#FF8000
+# BackgroundColor=#000000
+# GazeValidation=None
+# ... (további metaadatok)
+Phase,TrialNumber,PlannedTestTrials,EspReactionTimeMs,LocalReactionTimeMs,Valid,InvalidReason,RecordedAt,ForeperiodMs,ScanoutCorrectionUs,StimulusCenterX,StimulusCenterY,StimulusDiameterPx,StimulusEccentricityPx,ValidGazeRatio,GazeSamplesInWindow,MeanEyeDistanceMm,ClickX,ClickY
+Practice,1,15,285.994659,322.4157,True,None,2026-11-09T18:58:47.1668648+01:00,1436,-3170.659,1659.8,741.8,60,728.4,,,,986,515
+Practice,2,15,225.988699,271.8903,True,None,2026-11-09T18:58:49.4785244+01:00,1777,-1084.699,544.2,916.7,60,561,,,,987,515
+Test,1,15,185.84157000000002,230.6931,True,None,2026-11-09T18:58:51.5615460+01:00,1606,-5709.57,1275.3,529.5,60,315.5,,,,991,519
+Test,2,15,231.461556,272.6303,True,None,2026-11-09T18:58:53.4183418+01:00,1333,-4374.556,1674.5,640.7,60,721.6,,,,991,519
+... (további próbák)
+# EndedAt=2026-11-09T18:59:20.5742639+01:00
+# Status=Completed
