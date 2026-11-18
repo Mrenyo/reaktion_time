@@ -25,7 +25,8 @@ internal sealed class AppPaths
     public string SettingsFilePath => Path.Combine(RootDirectory, "beallitasok.json");
 
     // Az 1-es formátumverziójú mérések helye (az exe mellett); a statisztika ezeket is beolvassa.
-    public string LegacyMeasurementsDirectory => Path.Combine(AppContext.BaseDirectory, "measurements");
+    // Nem függ az adatmappától, ezért statikus.
+    public static string LegacyMeasurementsDirectory { get; } = Path.Combine(AppContext.BaseDirectory, "measurements");
 
     public static AppPaths FromEnvironment()
     {

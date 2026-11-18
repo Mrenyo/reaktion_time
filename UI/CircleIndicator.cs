@@ -2,10 +2,12 @@
 
 namespace ReactionTimeMeasurementApp.UI;
 
-public class CircleIndicator : Control
+// Körvonalas jelölő (a fejlesztői tekintet-overlay köre): csak a gyűrű látszik, és az egérkattintásokat
+// átengedi az alatta lévő vezérlőnek.
+internal sealed class CircleIndicator : Control
 {
-    private const int WmNchittest = 0x84;
-    private const int HtTransparent = -1;
+    private const int WM_NCHITTEST = 0x0084;
+    private const int HTTRANSPARENT = -1;
     private const float OutlineThickness = 2f;
 
     public CircleIndicator()
@@ -33,7 +35,7 @@ public class CircleIndicator : Control
 
     protected override void OnPaintBackground(PaintEventArgs pevent)
     {
-        // Intentionally empty: the control itself has no background, only an outline ring.
+        // Szándékosan üres: a vezérlőnek nincs háttere, csak a körvonala látszik.
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -55,9 +57,9 @@ public class CircleIndicator : Control
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmNchittest)
+        if (m.Msg == WM_NCHITTEST)
         {
-            m.Result = (IntPtr)HtTransparent;
+            m.Result = (IntPtr)HTTRANSPARENT;
             return;
         }
 

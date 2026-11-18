@@ -1,71 +1,64 @@
-using System.Diagnostics;
-using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Security.Cryptography;
 using ReactionTimeMeasurementApp.Diagnostics;
 using ReactionTimeMeasurementApp.Domain;
 
 namespace ReactionTimeMeasurementApp.Measurement;
 
-// A reakcióidő-mérés menete (MVP presenter). Egy mérési nézethez (IMeasurementView) és egy mérési
-// módhoz (IMeasurementMode) tartozik; a szemkövetőt, az ESP-t, a tárolást, a beállításokat és a
-// képidőzítést interfészeken keresztül kapja (konstruktoros függőséginjektálás), ezért WinForms és
-// valódi hardver nélkül is futtatható.
+// A reakcióidő-mérés indítása és lezárása (MVP presenter). Egy mérési nézethez (IMeasurementView)
+// tartozik; a szemkövetőt, az ESP-t, a tárolást, a beállításokat és a képidőzítést interfészeken
+// keresztül kapja (konstruktoros függőséginjektálás), ezért WinForms és valódi hardver nélkül is
+// futtatható. Magukat a próbákat a TrialRunner futtatja.
 //
-// Szálkezelés: a nézet eseményei a UI-szálon érkeznek, a mérés előkészítése is ott fut. A próbák
-// ciklusa (RunMeasurementLoopAsync) háttérszálon fut, és minden nézet- vagy szemkövető-állapotot
-// érintő műveletet az IMeasurementView.InvokeAsync-kal a UI-szálra küld.
+// Előtér és mérés: nyugalmi állapotban a nézet az előteret mutatja, a legutóbb betöltött beállítások
+// alapján (_lobby* mezők). A mérés indításakor a presenter újra betölti és ellenőrzi a beállításokat,
+// és egy változatlan pillanatképet (SessionContext) készít; a futó mérés minden lépése kizárólag ebből
+// dolgozik, így a beállítások közbeni újratöltése nem hat rá.
+//
+// Szálkezelés: a nézet eseményei a UI-szálon érkeznek, és a presenter minden mezője csak ott íródik és
+// olvasódik (az await-ek a UI-szálra térnek vissza). A próbák ciklusa háttérszálon fut (TrialRunner).
 public sealed class MeasurementPresenter
 {
-    private static readonly TimeSpan ViewingDistanceMeasurementDuration = TimeSpan.FromSeconds(1);
-    private const int MaxStimulusPlacementAttempts = 1000;
-    private const float MinStimulusDiameterPx = 4f;
-
-    // Ha a Tobii display area méretaránya ennél jobban eltér a kijelzőétől, a display area
-    // valószínűleg egy másik monitorra van beállítva - ilyenkor a fizikai méret sem hiteles.
-    private const double MaxDisplayAspectMismatch = 0.05;
+    // A mérés vége után ennyi ideig tiltottak az előtér gombjai: egy késve érkező kattintás a
+    // válaszegéren ne indítson rögtön új mérést az újra megjelenő "Új mérés indítása" gombbal.
+    private static readonly TimeSpan PostSessionLockDuration = TimeSpan.FromSeconds(1.5);
 
     private static readonly string AppVersion =
         typeof(MeasurementPresenter).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? "ismeretlen";
 
     private readonly IMeasurementView _view;
-    private readonly IMeasurementMode _mode;
     private readonly IGazeTracker _gazeTracker;
     private readonly IResponseDeviceConnector _deviceConnector;
     private readonly IMeasurementRepository _repository;
     private readonly IExperimentSettingsProvider _settingsProvider;
     private readonly IDisplayTimingProvider _displayTimingProvider;
     private readonly bool _manageTrackingLifecycle;
-    private readonly Random _random = new();
-    private readonly Stopwatch _reactionStopwatch = new();
-    private readonly List<MeasurementResult> _currentResults = new();
 
-    private ExperimentSettings _settings;
-    private SessionGeometry? _geometry;
-    private TrialSchedule? _schedule;
-    private IMeasurementSessionWriter? _writer;
-    private IResponseDevice? _device;
-    private IReadOnlyDictionary<string, string> _sessionMetadata = new Dictionary<string, string>();
-    private DateTime _sessionStartedAt;
+    // Az előtér adatai: a legutóbb betöltött beállítások, a hozzájuk tartozó tekintetszabály (null, ha
+    // a beállítások hibásak) és a beállítási hiba szövege (null, ha nincs hiba).
+    private ExperimentSettings _lobbySettings;
+    private IGazeValidationRule? _lobbyRule;
+    private string? _lobbyError;
 
-    private RectangleF _stimulusRect = RectangleF.Empty;
-    private bool _isMeasurementRunning;
-    private long _stimulusOnsetUs;
-    private bool _trackerInitialized;
+    // A futó mérés; csak mérés közben van kitöltve.
+    private TrialRunner? _runner;
     private CancellationTokenSource? _measurementCts;
     private Task? _measurementTask;
+
+    private bool _trackerInitialized;
+    private bool _optionalTrackerSearchDone;
     private bool _isTransitioning;
     private string _transitionText = string.Empty;
-    private string _lastResultText = "-";
+    private bool _isPostSessionLocked;
 
-    // Az utolsó mérés kimenetele: nyugalmi állapotban ennek megfelelő szöveg jelenik meg az
-    // indítási instrukció helyett. Null, ha ebben a nézetben még nem volt mérés.
-    private SessionStatus? _lastSessionStatus;
-    private int _lastSessionValidTrials;
+    // Az utolsó mérés kimenetele az előtér állapotsorához. Null, ha ebben a nézetben még nem volt
+    // mérés, vagy a nézetet azóta elhagyták.
+    private LastSessionSummary? _lastSession;
 
     public MeasurementPresenter(
         IMeasurementView view,
-        IMeasurementMode mode,
         IGazeTracker gazeTracker,
         IResponseDeviceConnector deviceConnector,
         IMeasurementRepository repository,
@@ -74,7 +67,6 @@ public sealed class MeasurementPresenter
         bool manageTrackingLifecycle)
     {
         _view = view;
-        _mode = mode;
         _gazeTracker = gazeTracker;
         _deviceConnector = deviceConnector;
         _repository = repository;
@@ -82,15 +74,87 @@ public sealed class MeasurementPresenter
         _displayTimingProvider = displayTimingProvider;
         _manageTrackingLifecycle = manageTrackingLifecycle;
 
-        // A nyugalmi szövegekhez; egy esetleges hibát a mérés indításakor jelzünk.
-        (_settings, _) = settingsProvider.Load();
-        Profile = mode.CreateProfile(_settings);
+        // Az előtér szövegeihez. A nézet helyzetét (GetStageInfo) itt még nem kérdezzük le: a MainForm a
+        // nézetet előtöltéskor hozza létre, még mielőtt a felületre kerülne.
+        ApplyLobbySettings(settingsProvider.Load());
 
         _view.StartRequested += async (_, _) => await RunSafelyAsync(StartAsync);
         _view.LeaveRequested += async (_, _) => await RunSafelyAsync(LeaveAsync);
         _view.AbortRequested += async (_, _) => await RunSafelyAsync(AbortAsync);
+        _view.ResponseClicked += (_, eventArgs) => _runner?.HandleResponseClick(eventArgs.StagePoint);
         _view.Closed += (_, _) => _measurementCts?.Cancel();
+        _gazeTracker.ConnectionChanged += (_, eventArgs) =>
+            _ = RunSafelyAsync(() => _view.InvokeAsync(() => HandleTrackerConnectionChanged(eventArgs.IsConnected)));
         RefreshView();
+    }
+
+    // Minden mérés végén (befejezés, megszakítás) jelez, a rögzített próbákkal.
+    public event EventHandler<MeasurementSessionResultEventArgs>? SessionEnded;
+
+    // Kell-e kalibráció a legutóbb betöltött beállításokkal (a tekintet-ellenőrzéshez szemkövető és
+    // kalibráció kell). Hibás beállításoknál hamis: a hibát az előtér mutatja. A MainForm a nézet
+    // megnyitása előtt, a ReloadSettings után kérdezi le.
+    public bool RequiresCalibration => _lobbyRule?.RequiresTracker == true;
+
+    // Volt-e megerősített kalibráció ebben a programfutásban; a MainForm állítja be a nézet
+    // megjelenítése előtt. Csak a metaadatokba kerül: a kalibrációt a MainForm követeli meg, és csak
+    // tekintet-ellenőrzéses méréshez.
+    public bool CalibrationConfirmed { get; set; }
+
+    // A beállítások újratöltése az előtérhez (UI-szálon). A MainForm a nézet megjelenítése előtt és a
+    // beállítások mentése után hívja. Futó mérés közben is biztonságos, mert a mérés a saját
+    // pillanatképéből dolgozik. A tekintet-ellenőrzés nélküli méréshez újra engedélyezi a szemkövető
+    // egyszeri keresését is (pl. ha közben csatlakoztatták az eszközt).
+    public void ReloadSettings()
+    {
+        ApplyLobbySettings(_settingsProvider.Load());
+        _optionalTrackerSearchDone = false;
+        RefreshView();
+    }
+
+    public async Task StartAsync()
+    {
+        if (_isTransitioning || _isPostSessionLocked)
+        {
+            return;
+        }
+
+        await RunTransitionAsync("Mérés indítása...", async () =>
+        {
+            try
+            {
+                await StartMeasurementCoreAsync();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    // A nézet elhagyása: a futó mérést leállítja (az eddigi próbák mentve maradnak). A nézet
+    // elhagyásával az előző mérés kimenetele lekerül az állapotsorról.
+    public async Task LeaveAsync()
+    {
+        if (_isTransitioning)
+        {
+            return;
+        }
+
+        await RunTransitionAsync("Leállítás...", StopMeasurementAsync);
+        _lastSession = null;
+        RefreshView();
+    }
+
+    // Megszakítás (Esc): a futó mérést leállítja, a nézet marad.
+    public async Task AbortAsync()
+    {
+        if (_runner is not { } runner || _isTransitioning)
+        {
+            return;
+        }
+
+        Logger.Info($"Mérés megszakítása a felhasználó kérésére ({runner.Context.SessionName}).");
+        await RunTransitionAsync("Leállítás...", StopMeasurementAsync);
     }
 
     // Az eseménykezelők async void-ként futnak: egy kiszökő kivétel az egész alkalmazást leállítaná
@@ -107,87 +171,19 @@ public sealed class MeasurementPresenter
         }
     }
 
-    // Minden mérés végén (befejezés, korlát, megszakítás) jelez, a rögzített próbákkal.
-    public event EventHandler<MeasurementSessionResultEventArgs>? SessionEnded;
-
-    public MeasurementProfile Profile { get; private set; }
-
-    public bool IsMeasurementRunning => _isMeasurementRunning;
-
-    public async Task StartAsync()
+    // Indítás és leállítás: a művelet idejére a gombok tiltottak, és az indítógomb a folyamatot jelzi.
+    private async Task RunTransitionAsync(string text, Func<Task> operation)
     {
-        if (_isTransitioning)
-        {
-            return;
-        }
-
         _isTransitioning = true;
-        _transitionText = "Mérés indítása...";
+        _transitionText = text;
         RefreshView();
-
         try
         {
-            await StartMeasurementCoreAsync();
-        }
-        catch (OperationCanceledException)
-        {
+            await operation();
         }
         catch (Exception ex)
         {
-            Logger.Error($"Mérés indítása közben hiba történt ({Profile.SessionName}).", ex);
-            _view.ShowUnexpectedError(ex);
-            _isMeasurementRunning = false;
-        }
-        finally
-        {
-            _isTransitioning = false;
-            RefreshView();
-        }
-    }
-
-    // A nézet elhagyása: a futó mérést leállítja (az eddigi próbák mentve maradnak).
-    public async Task LeaveAsync()
-    {
-        if (_isTransitioning)
-        {
-            return;
-        }
-
-        _isTransitioning = true;
-        _transitionText = "Leállítás...";
-        if (!_isMeasurementRunning)
-        {
-            _lastSessionStatus = null;
-        }
-
-        RefreshView();
-        await StopMeasurementWithErrorHandlingAsync();
-    }
-
-    // Megszakítás (Esc): a futó mérést leállítja, a nézet marad.
-    public async Task AbortAsync()
-    {
-        if (!_isMeasurementRunning || _isTransitioning)
-        {
-            return;
-        }
-
-        _isTransitioning = true;
-        _transitionText = "Leállítás...";
-        RefreshView();
-        Logger.Info($"Mérés megszakítása a felhasználó kérésére ({Profile.SessionName}).");
-        await StopMeasurementWithErrorHandlingAsync();
-    }
-
-    private async Task StopMeasurementWithErrorHandlingAsync()
-    {
-        try
-        {
-            await StopMeasurementAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Mérés leállítása közben hiba történt ({Profile.SessionName}).", ex);
+            Logger.Error($"Váratlan hiba ({text}).", ex);
             _view.ShowUnexpectedError(ex);
         }
         finally
@@ -197,51 +193,73 @@ public sealed class MeasurementPresenter
         }
     }
 
-    // A UI-szálon fut: előbb minden feltételt ellenőriz (beállítások, szemkövető, kijelző, ESP,
-    // mentési hely), és csak ha mind rendben van, indítja el a próbákat.
+    // A UI-szálon fut: előbb minden feltételt ellenőriz (beállítások, szemkövető, mérőfelület, kijelző,
+    // ESP, mentési hely), és csak ha mind rendben van, indítja el a próbákat. Bármely hiba esetén minden
+    // erőforrást felszabadít, és a nézet az előtérben marad.
     private async Task StartMeasurementCoreAsync()
     {
         await StopMeasurementAsync();
 
-        if (!TryApplySettings() || !await EnsureTrackerReadyAsync())
+        var load = _settingsProvider.Load();
+        ApplyLobbySettings(load);
+        if (_lobbyError is not null)
+        {
+            Logger.Warning($"Hibás mérési beállítások: {_lobbyError}");
+            _view.ShowSettingsError(_settingsProvider.SettingsFilePath, _lobbyError);
+            return;
+        }
+
+        // Saját másolat: a pillanatkép az előtér beállításaitól is független.
+        var settings = load.Settings.Clone();
+        var rule = GazeValidationRules.For(settings.Gaze.Validation);
+        if (!await EnsureTrackerAsync(rule))
         {
             return;
         }
 
-        // A követést mindig elindítjuk (ha már fut, pl. dev módban az overlay miatt, ez nem csinál
-        // semmit), különben dev módban, ha az overlay indulásakor még nem volt eszköz, egyetlen
-        // tekintetminta sem érkezne. Leállítani csak akkor állítjuk le, ha a nézet kezeli az életciklust.
-        _gazeTracker.StartTracking();
+        // Ha van szemkövető, a tekintetadat a tekintet-ellenőrzés nélküli mérésben is rögzül. A követést
+        // ilyenkor mindig elindítjuk (ha már fut, pl. dev módban az overlay miatt, ez nem csinál semmit),
+        // különben dev módban, ha az overlay indulásakor még nem volt eszköz, egyetlen tekintetminta sem
+        // érkezne. Leállítani csak akkor állítjuk le, ha a presenter kezeli az életciklust.
+        var gazeActive = _gazeTracker.IsTrackerAvailable;
+        if (gazeActive)
+        {
+            _gazeTracker.StartTracking();
+        }
 
-        _currentResults.Clear();
-        _schedule = null;
-        _geometry = null;
-        _lastResultText = "-";
-        _isMeasurementRunning = true;
-        _stimulusRect = RectangleF.Empty;
-        _stimulusOnsetUs = 0;
-        _reactionStopwatch.Reset();
         _view.ShowStimulus(null, paintImmediately: false);
-        RefreshView();
 
-        var started = false;
+        IResponseDevice? device = null;
         try
         {
-            _geometry = await CaptureSessionGeometryAsync();
+            var geometry = await SessionGeometryBuilder.CaptureAsync(
+                _view.GetStageInfo(), settings, rule, gazeActive, _displayTimingProvider, _gazeTracker);
 
-            // A mérés ESP nélkül nem indul el: a reakcióidőt a fotodiódás hardveres mérés adja, egy
-            // pusztán szoftveres (kattintásos) mérés eredménye ezzel nem lenne összevethető.
-            if (!await TryConnectDeviceAsync())
+            // A mérés csak válaszoló ESP-vel indul el: a pontos reakcióidőt a fotodiódás hardveres mérés
+            // adja. Ha az ESP a mérés közben esik ki, a mérés nélküle, a PC által érzékelt kattintásokkal
+            // fejeződik be.
+            device = await TryConnectDeviceAsync(settings.Hardware);
+            if (device is null)
             {
                 return;
             }
 
-            _sessionStartedAt = DateTime.Now;
-            var metadata = BuildSessionMetadata(_geometry, _device!);
-            _sessionMetadata = metadata.ToDictionary(pair => pair.Key, pair => pair.Value);
+            var seed = RandomNumberGenerator.GetInt32(int.MaxValue);
+            var context = new SessionContext(
+                settings,
+                rule,
+                geometry,
+                gazeActive,
+                seed,
+                ParseColor(settings.Stimulus.Color),
+                ParseColor(settings.Stimulus.BackgroundColor));
+
+            var startedAt = DateTime.Now;
+            var metadata = SessionMetadata.Build(context, _gazeTracker, device, CalibrationConfirmed, AppVersion);
+            IMeasurementSessionWriter writer;
             try
             {
-                _writer = _repository.CreateSession(Profile.SessionName, _sessionStartedAt, metadata);
+                writer = _repository.CreateSession(context.SessionName, startedAt, metadata);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
@@ -250,12 +268,22 @@ public sealed class MeasurementPresenter
                 return;
             }
 
-            _schedule = new TrialSchedule(Profile.Mode);
-            _measurementCts = new CancellationTokenSource();
+            var trials = settings.Trials;
             Logger.Info(
-                $"Mérés indul: {Profile.SessionName} ({Profile.Mode.PracticeTrials} gyakorló, {Profile.Mode.TestTrials} érvényes tesztpróba a cél).");
-            _measurementTask = RunMeasurementLoopAsync(_measurementCts.Token);
-            started = true;
+                $"Mérés indul: {context.SessionName} ({trials.PracticeTrials} gyakorló + {trials.MeasuredTrials} mért inger, "
+                + $"tekintetadat: {(gazeActive ? "rögzül" : "nincs")}, véletlenmag: {seed}).");
+
+            // Innentől az ESP a TrialRunneré: ő zárja le a mérés végén.
+            var runner = new TrialRunner(
+                context, _view, _gazeTracker, device, writer, startedAt, metadata.ToDictionary(pair => pair.Key, pair => pair.Value));
+            device = null;
+            _runner = runner;
+            _measurementCts = new CancellationTokenSource();
+
+            // A jelenet (beállított háttér, kereszt, fekete jelző) még a ciklus indulása előtt a nézetre
+            // kerül, így az első inger biztosan már a mérési jeleneten jelenik meg.
+            RefreshView();
+            _measurementTask = RunSessionAsync(runner, _measurementCts.Token);
         }
         catch (MeasurementSetupException ex)
         {
@@ -264,735 +292,286 @@ public sealed class MeasurementPresenter
         }
         finally
         {
-            if (!started)
+            if (_runner is null)
             {
-                await DisposeDeviceAsync();
-                if (_manageTrackingLifecycle)
+                if (device is not null)
+                {
+                    await device.DisposeAsync();
+                }
+
+                if (gazeActive && _manageTrackingLifecycle)
                 {
                     _gazeTracker.StopTracking();
                 }
-
-                _isMeasurementRunning = false;
-                RefreshView();
             }
         }
     }
 
-    private bool TryApplySettings()
+    // A próbák lefuttatása háttérszálon, majd a mérés lezárása a felületen.
+    private async Task RunSessionAsync(TrialRunner runner, CancellationToken cancellationToken)
     {
-        var (settings, error) = _settingsProvider.Load();
-        if (error is null)
+        var outcome = await Task.Run(() => runner.RunAsync(cancellationToken), CancellationToken.None);
+        try
         {
-            var profile = _mode.CreateProfile(settings);
-            error = _mode.ValidateProfile(profile);
-            if (error is null)
+            await _view.InvokeAsync(() => EndSession(runner, outcome));
+        }
+        catch (Exception ex)
+        {
+            // Pl. az alkalmazás bezárásakor a nézet már megszűnt; a fájl ekkorra le van zárva.
+            Logger.Error("A mérés lezárása a felületen nem sikerült.", ex);
+        }
+    }
+
+    // Az előtér beállításainak frissítése egy betöltés eredményéből. A hibát itt nem jelezzük felugró
+    // ablakban: az előtér összefoglalója mutatja, a mérés indítása pedig hibaüzenettel áll meg.
+    [MemberNotNull(nameof(_lobbySettings))]
+    private void ApplyLobbySettings(SettingsLoadResult load)
+    {
+        _lobbySettings = load.Settings;
+        _lobbyError = load.Error;
+        if (_lobbyError is null && load.Settings.Validate() is { Count: > 0 } errors)
+        {
+            _lobbyError = string.Join(Environment.NewLine, errors);
+        }
+
+        _lobbyRule = _lobbyError is null ? GazeValidationRules.For(load.Settings.Gaze.Validation) : null;
+    }
+
+    // Tekintet-ellenőrzéshez a szemkövető kötelező. Enélkül is használjuk, ha elérhető (a tekintetadat
+    // ilyenkor is rögzül), de a hiánya nem akadályozza a mérést; az eszközkeresést, ami másodpercekig is
+    // tarthat, ilyenkor a beállítások legutóbbi újratöltése (ReloadSettings) óta csak egyszer próbáljuk.
+    private async Task<bool> EnsureTrackerAsync(IGazeValidationRule rule)
+    {
+        if (rule.RequiresTracker)
+        {
+            if (!_trackerInitialized || !_gazeTracker.IsTrackerAvailable)
             {
-                _settings = settings;
-                Profile = profile;
-                return true;
+                await _gazeTracker.InitializeAsync(forceRefresh: true);
+                _trackerInitialized = true;
             }
+
+            if (!_gazeTracker.IsTrackerAvailable)
+            {
+                _view.ShowTrackerNotConnected();
+                return false;
+            }
+
+            return true;
         }
 
-        Logger.Warning($"Hibás mérési beállítások: {error}");
-        _view.ShowSettingsError(_settingsProvider.SettingsFilePath, error);
-        return false;
-    }
-
-    private async Task<bool> EnsureTrackerReadyAsync()
-    {
-        if (!_trackerInitialized || !_gazeTracker.IsTrackerAvailable)
+        if (!_gazeTracker.IsTrackerAvailable && !_optionalTrackerSearchDone)
         {
-            await _gazeTracker.InitializeAsync(forceRefresh: true);
+            _optionalTrackerSearchDone = true;
+            await _gazeTracker.InitializeAsync();
             _trackerInitialized = true;
         }
 
-        if (_gazeTracker.IsTrackerAvailable)
+        if (!_gazeTracker.IsTrackerAvailable)
         {
-            return true;
+            Logger.Info("A szemkövető nem érhető el: a mérés tekintet-ellenőrzés nélkül fut, ebben a mérésben nem rögzül tekintetadat.");
         }
 
-        _view.ShowTrackerNotConnected();
-        return false;
+        return true;
     }
 
-    private async Task<bool> TryConnectDeviceAsync()
+    // A port megnyitása után kapcsolatellenőrzés ("CHECK" -> "OK"): a mérés csak akkor indul, ha az ESP
+    // válaszol. Null, ha nem sikerült (a hibát a nézet már megmutatta, az eszköz le van zárva).
+    private async Task<IResponseDevice?> TryConnectDeviceAsync(HardwareSettings hardware)
     {
+        IResponseDevice device;
         try
         {
-            _device = await _deviceConnector.ConnectAsync(_settings.Hardware, CancellationToken.None);
-            return true;
+            device = await _deviceConnector.ConnectAsync(hardware, CancellationToken.None);
         }
         catch (ResponseDeviceConnectionException ex)
         {
             Logger.Warning($"[ESP] Kapcsolódás sikertelen ({ex.PortName}): {ex.Message}");
             _view.ShowEspNotConnected(ex.PortName, ex.InnerException ?? ex);
-            return false;
-        }
-    }
-
-    // A kijelző fizikai mérete a Tobii display areából jön (a Windows DPI-je nem a valódi
-    // pixelsűrűség), a nézési távolságot a Tobii méri a szem helyzetéből, a képidőzítést pedig a
-    // Windows adja meg. Mindez a mérés elején egyszer rögzül, és a metaadatok közé kerül.
-    private async Task<SessionGeometry> CaptureSessionGeometryAsync()
-    {
-        var stage = _view.GetStageInfo();
-        var bounds = stage.ScreenBounds;
-        var displaySize = await _gazeTracker.RefreshDisplayAreaAsync()
-            ?? throw new MeasurementSetupException(
-                "A Tobii szemkövetőn nincs beállítva a kijelző (display area), ezért a kijelző fizikai mérete nem ismert. "
-                + "Állítsd be a Tobii Pro Eye Tracker Managerben, majd próbáld újra.");
-
-        var screenAspect = bounds.Width / (double)bounds.Height;
-        var displayAspect = displaySize.WidthMm / displaySize.HeightMm;
-        if (Math.Abs((screenAspect / displayAspect) - 1) > MaxDisplayAspectMismatch)
-        {
-            throw new MeasurementSetupException(
-                $"A Tobii display area ({displaySize.WidthMm:0} × {displaySize.HeightMm:0} mm) méretaránya nem egyezik a mérést futtató "
-                + $"kijelzőével ({bounds.Width} × {bounds.Height} képpont). Valószínűleg a display area egy másik monitorra van beállítva, "
-                + "vagy az alkalmazás nem azon a monitoron fut, amelyikre a szemkövető be van állítva.");
+            return null;
         }
 
-        var pixelsPerMm = ((bounds.Width / displaySize.WidthMm) + (bounds.Height / displaySize.HeightMm)) / 2;
-        var timing = _displayTimingProvider.Read(stage.ScreenDeviceName, bounds);
-        if (timing.Warning is not null)
-        {
-            Logger.Warning($"[SCANOUT] {timing.Warning}");
-        }
-
-        var measuredDistanceMm = await _gazeTracker.MeasureViewingDistanceAsync(ViewingDistanceMeasurementDuration);
-        var viewingDistanceMm = measuredDistanceMm ?? (_settings.DefaultViewingDistanceCm * 10);
-        var viewingDistanceSource = measuredDistanceMm.HasValue ? "Tobii (mért)" : "Beállítás (a Tobii nem tudta mérni)";
-        if (!measuredDistanceMm.HasValue)
-        {
-            Logger.Warning($"A nézési távolság nem mérhető, a beállított {viewingDistanceMm:0} mm-rel számolunk.");
-        }
-
-        var visualSpace = new StageVisualSpace(stage.FixationPoint, pixelsPerMm, viewingDistanceMm);
-        var effectiveMaxEccentricity = CheckStimulusPlacementFeasibility(visualSpace, stage.StageSize);
-
-        Logger.Info(
-            $"Kijelző: {stage.ScreenDeviceName} {bounds.Width}x{bounds.Height} px, {displaySize.WidthMm:0.0}x{displaySize.HeightMm:0.0} mm, "
-            + $"{pixelsPerMm:0.###} px/mm, {timing.RefreshRateHz:0.###} Hz ({timing.Source}); nézési távolság {viewingDistanceMm:0} mm ({viewingDistanceSource}).");
-
-        return new SessionGeometry(
-            stage,
-            displaySize,
-            pixelsPerMm,
-            viewingDistanceMm,
-            viewingDistanceSource,
-            timing,
-            visualSpace,
-            effectiveMaxEccentricity);
-    }
-
-    // Ellenőrzi, hogy a beállított excentricitás-tartomány elfér-e a mérőfelületen. A legkisebb
-    // értéknek legalább egy irányban el kell férnie; a legnagyobbat, ha sehol nem fér el, a mérés
-    // a még elférő értékre csökkenti (és ezt a metaadatokban rögzíti).
-    private double CheckStimulusPlacementFeasibility(StageVisualSpace visualSpace, Size stageSize)
-    {
-        var mode = Profile.Mode;
-        if (!CanPlaceStimulusAt(visualSpace, stageSize, mode.MinEccentricityDeg))
-        {
-            throw new MeasurementSetupException(
-                $"A beállított legkisebb excentricitás ({mode.MinEccentricityDeg:0.#}°) ezen a kijelzőn, "
-                + $"{visualSpace.ViewingDistanceMm / 10:0} cm nézési távolságból egyik irányban sem fér el. "
-                + $"Csökkentsd a MinEccentricityDeg értékét a beállításfájlban ({_settingsProvider.SettingsFilePath}).");
-        }
-
-        var effectiveMax = mode.MaxEccentricityDeg;
-        while (effectiveMax > mode.MinEccentricityDeg && !CanPlaceStimulusAt(visualSpace, stageSize, effectiveMax))
-        {
-            effectiveMax = Math.Max(mode.MinEccentricityDeg, effectiveMax - 0.5);
-        }
-
-        if (effectiveMax < mode.MaxEccentricityDeg)
-        {
-            Logger.Warning($"A beállított {mode.MaxEccentricityDeg:0.#}° excentricitás nem fér el, a legnagyobb használt érték {effectiveMax:0.#}°.");
-        }
-
-        return effectiveMax;
-    }
-
-    private bool CanPlaceStimulusAt(StageVisualSpace visualSpace, Size stageSize, double eccentricityDeg)
-    {
-        for (var directionDeg = 0; directionDeg < 360; directionDeg++)
-        {
-            if (TryCreateStimulusRect(visualSpace, stageSize, eccentricityDeg, directionDeg * Math.PI / 180, out _))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // Az inger a mérőfelület biztonsági margóján belül marad, és sosem fedi (a margón belül sem
-    // közelíti meg) a fotodióda-jelzőt, különben a fotodióda az ingert is érzékelhetné.
-    private bool TryCreateStimulusRect(StageVisualSpace visualSpace, Size stageSize, double eccentricityDeg, double directionRad, out RectangleF rect)
-    {
-        var diameter = StimulusDiameterPx(visualSpace);
-        var center = visualSpace.PointAtEccentricity(eccentricityDeg, directionRad);
-        rect = new RectangleF(center.X - (diameter / 2f), center.Y - (diameter / 2f), diameter, diameter);
-
-        var margin = Profile.StimulusSafeMarginPx;
-        var allowedArea = new RectangleF(margin, margin, stageSize.Width - (2 * margin), stageSize.Height - (2 * margin));
-        if (!allowedArea.Contains(rect))
-        {
-            return false;
-        }
-
-        var photodiodeBounds = PhotodiodeMarker.GetBounds(stageSize);
-        return photodiodeBounds.IsEmpty || !rect.IntersectsWith(RectangleF.Inflate(photodiodeBounds, margin, margin));
-    }
-
-    private float StimulusDiameterPx(StageVisualSpace visualSpace)
-    {
-        return (float)Math.Max(MinStimulusDiameterPx, visualSpace.SizeDegToPx(Profile.Mode.StimulusDiameterDeg));
-    }
-
-    private List<KeyValuePair<string, string>> BuildSessionMetadata(SessionGeometry geometry, IResponseDevice device)
-    {
-        var mode = Profile.Mode;
-        var timing = geometry.Timing;
-        var stage = geometry.Stage;
-        var photodiode = stage.PhotodiodeBounds;
-        var metadata = new List<KeyValuePair<string, string>>();
-
-        void Add(string key, string value) => metadata.Add(new KeyValuePair<string, string>(key, value));
-        static string Number(double value, string format = "0.###") => value.ToString(format, CultureInfo.InvariantCulture);
-        static string Integer(int value) => value.ToString(CultureInfo.InvariantCulture);
-
-        Add("AppVersion", AppVersion);
-        Add("Tracker", _gazeTracker.TrackerDescription);
-        Add("GazeOutputFrequencyHz", _gazeTracker.GazeOutputFrequencyHz.HasValue ? Number(_gazeTracker.GazeOutputFrequencyHz.Value) : string.Empty);
-        Add("SerialPort", device.PortName);
-        Add("SerialBaudRate", Integer(device.BaudRate));
-        Add("ScreenDevice", stage.ScreenDeviceName);
-        Add("ScreenResolutionPx", $"{stage.ScreenBounds.Width}x{stage.ScreenBounds.Height}");
-        Add("DisplaySizeMm", $"{Number(geometry.DisplaySize.WidthMm, "0.0")}x{Number(geometry.DisplaySize.HeightMm, "0.0")}");
-        Add("DisplaySizeSource", "Tobii display area");
-        Add("PixelsPerMm", Number(geometry.PixelsPerMm, "0.####"));
-        Add("ViewingDistanceMm", Number(geometry.ViewingDistanceMm, "0.#"));
-        Add("ViewingDistanceSource", geometry.ViewingDistanceSource);
-        Add("RefreshRateHz", Number(timing.RefreshRateHz, "0.####"));
-        Add("VerticalActiveLines", Integer(timing.VerticalActiveLines));
-        Add("VerticalTotalLines", Integer(timing.VerticalTotalLines));
-        Add("DesktopHeightPx", Integer(timing.DesktopHeightPx));
-        Add("ScanoutTimingSource", timing.Source);
-        Add("ScanoutTimingExact", timing.IsExact.ToString());
-        if (timing.Warning is not null)
-        {
-            Add("ScanoutTimingWarning", timing.Warning);
-        }
-
-        Add("StageSizePx", $"{stage.StageSize.Width}x{stage.StageSize.Height}");
-        Add("StageScreenOriginPx", $"{stage.StageScreenOrigin.X},{stage.StageScreenOrigin.Y}");
-        Add("PhotodiodeMarkerStagePx", $"{photodiode.X},{photodiode.Y},{photodiode.Width},{photodiode.Height}");
-        Add("TestTrials", Integer(mode.TestTrials));
-        Add("PracticeTrials", Integer(mode.PracticeTrials));
-        Add("RepeatInvalidTrials", mode.RepeatInvalidTrials.ToString());
-        Add("MaxTestAttempts", Integer(mode.MaxTestAttempts));
-        Add("ForeperiodDistribution", mode.ForeperiodDistribution.ToString());
-        Add("ForeperiodMinMs", Integer(mode.ForeperiodMinMs));
-        Add("ForeperiodMaxMs", Integer(mode.ForeperiodMaxMs));
-        Add("ForeperiodExponentialMeanMs", Integer(mode.ForeperiodExponentialMeanMs));
-        Add("StimulusDiameterDeg", Number(mode.StimulusDiameterDeg));
-        Add("StimulusDiameterPx", Number(StimulusDiameterPx(geometry.VisualSpace), "0.#"));
-        Add("MinEccentricityDeg", Number(mode.MinEccentricityDeg));
-        Add("MaxEccentricityDeg", Number(mode.MaxEccentricityDeg));
-        Add("EffectiveMaxEccentricityDeg", Number(geometry.EffectiveMaxEccentricityDeg));
-        Add("GazeValidityRadiusDeg", Number(mode.GazeValidityRadiusDeg));
-        Add("MinValidGazeSampleRatio", Number(_settings.MinValidGazeSampleRatio));
-        Add("ReactionTimeoutMs", Integer(mode.ReactionTimeoutMs));
-        return metadata;
-    }
-
-    private async Task RunMeasurementLoopAsync(CancellationToken cancellationToken)
-    {
-        var schedule = _schedule!;
-        var writer = _writer!;
-        var status = SessionStatus.Aborted;
-
+        Exception? error = null;
         try
         {
-            while (!cancellationToken.IsCancellationRequested && schedule.HasNextTrial)
+            if (await device.CheckAsync(CancellationToken.None))
             {
-                var phase = schedule.CurrentPhase;
-                var trialNumber = schedule.NextTrialNumber;
-                var trialLabel = FormatTrialLabel(phase, trialNumber);
-                var scanoutParameters = await PrepareScanoutTrialAsync(trialLabel).ConfigureAwait(false);
-                var scanoutCorrectionMessage = scanoutParameters.CreateCorrectionMessage();
-                Logger.Info($"[SCANOUT] {trialLabel}. próba: correctionUs={scanoutCorrectionMessage}");
-
-                var device = _device;
-                if (device is null)
-                {
-                    break;
-                }
-
-                int foreperiodMs;
-                lock (_random)
-                {
-                    foreperiodMs = ForeperiodSampler.Sample(_random, Profile.Mode);
-                }
-
-                double? espReactionTimeMs;
-                double? localReactionTimeMs;
-                long responseWindowEndUs;
-                bool espTimedOut;
-                try
-                {
-                    await device.SendScanoutCorrectionAsync(scanoutCorrectionMessage, cancellationToken).ConfigureAwait(false);
-                    await ShowStimulusAfterForeperiodAsync(foreperiodMs, cancellationToken).ConfigureAwait(false);
-                    var reaction = await WaitForReactionAsync(device, cancellationToken).ConfigureAwait(false);
-                    espReactionTimeMs = reaction.EspReactionTimeMs;
-                    localReactionTimeMs = reaction.LocalReactionTimeMs;
-                    espTimedOut = reaction.TimedOut;
-                    responseWindowEndUs = reaction.ResponseReceivedUs;
-                }
-                catch (Exception ex) when (ex is UnauthorizedAccessException || ex is InvalidOperationException || ex is IOException)
-                {
-                    Logger.Warning($"[ESP] Futásidejű hiba: {ex.Message}");
-                    await DisposeDeviceAsync().ConfigureAwait(false);
-                    await _view.InvokeAsync(() =>
-                        _view.ShowEspCommunicationError(device.PortName, device.BaudRate, ex)).ConfigureAwait(false);
-                    break;
-                }
-
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                Logger.Info(
-                    $"[EREDMÉNY] {trialLabel}. próba: ESP={FormatReaction(espReactionTimeMs)}, PC={FormatReaction(localReactionTimeMs)}, előperiódus={foreperiodMs} ms"
-                    + (espTimedOut ? " (ESP időtúllépés, a próba érvénytelen)" : string.Empty));
-
-                var outcome = new TrialOutcome(
-                    phase,
-                    trialNumber,
-                    foreperiodMs,
-                    scanoutCorrectionMessage,
-                    espReactionTimeMs,
-                    localReactionTimeMs,
-                    espTimedOut,
-                    responseWindowEndUs);
-                await _view.InvokeAsync(() => RecordReaction(outcome)).ConfigureAwait(false);
+                // A firmware verziója csak a metaadatokba kerül; ha nem kérdezhető le, a mérés ettől
+                // még elindul (a kommunikációs hibát viszont a lenti ág kezeli).
+                var firmwareVersion = await device.RequestFirmwareVersionAsync(CancellationToken.None);
+                Logger.Info($"[ESP] Kapcsolat rendben ({device.PortName}, firmware: {firmwareVersion ?? "ismeretlen"}).");
+                return device;
             }
 
-            if (schedule.IsCompleted)
-            {
-                status = SessionStatus.Completed;
-            }
-            else if (!cancellationToken.IsCancellationRequested && !schedule.HasNextTrial)
-            {
-                status = SessionStatus.AttemptLimitReached;
-            }
-
-            Logger.Info(
-                $"Mérés véget ért ({Profile.SessionName}, {status}): {schedule.ValidTestTrials}/{Profile.Mode.TestTrials} érvényes, "
-                + $"{schedule.TestAttempts} tesztpróba, {schedule.PracticeTrialsDone} gyakorló.");
+            Logger.Warning($"[ESP] A kapcsolatellenőrzés sikertelen ({device.PortName}): nem érkezett \"OK\" válasz.");
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (TrialRunner.IsDeviceCommunicationError(ex))
         {
-            Logger.Info($"Mérés megszakítva ({Profile.SessionName}): {schedule.ValidTestTrials}/{Profile.Mode.TestTrials} érvényes próba után.");
+            Logger.Warning($"[ESP] A kapcsolatellenőrzés sikertelen ({device.PortName}): {ex.Message}");
+            error = ex;
         }
-        catch (Exception ex)
-        {
-            Logger.Error($"Váratlan hiba a mérési ciklusban ({Profile.SessionName}).", ex);
-            await _view.InvokeAsync(() => _view.ShowUnexpectedError(ex)).ConfigureAwait(false);
-        }
-        finally
-        {
-            await DisposeDeviceAsync().ConfigureAwait(false);
 
-            // Egy megszakított próba félbemaradt tekintetfelvételét el kell dobni, különben
-            // (főleg dev módban, ahol a követés a mérés után is fut) tovább gyűlnének a minták.
-            _gazeTracker.CancelGazeRecording();
-
-            // A fájlt itt, szálfüggetlenül zárjuk le, hogy akkor is megkapja a lezáró sort, ha a
-            // nézet (pl. az alkalmazás bezárása miatt) már nem tud a UI-szálon frissülni.
-            var endedAt = DateTime.Now;
-            Exception? closeError = null;
-            try
-            {
-                writer.Close(status, endedAt);
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                Logger.Error("A mérési fájl lezárása sikertelen.", ex);
-                closeError = ex;
-            }
-
-            try
-            {
-                await _view.InvokeAsync(() => EndSession(status, endedAt, writer.FilePath, closeError)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                // Pl. az alkalmazás bezárásakor a nézet már megszűnt; a fájl ekkorra le van zárva.
-                Logger.Error("A mérés lezárása a felületen nem sikerült.", ex);
-            }
-        }
+        _view.ShowEspCommunicationError(device.PortName, device.BaudRate, error);
+        await device.DisposeAsync();
+        return null;
     }
 
-    private void EndSession(SessionStatus status, DateTime endedAt, string filePath, Exception? closeError)
+    // UI-szálon. A szemkövető kiesése mérés közben: tekintet-ellenőrzéses mérésnél minden további próba
+    // érvénytelen lenne, ezért a mérés leáll; anélkül a mérés tekintetadat nélkül folytatódik. A
+    // résztvevő elé mérés közben nem kerül felugró ablak: a kiesést a mérés végén jelezzük.
+    private void HandleTrackerConnectionChanged(bool isConnected)
     {
-        if (_manageTrackingLifecycle)
-        {
-            _gazeTracker.StopTracking();
-        }
-
-        _isMeasurementRunning = false;
-        _stimulusRect = RectangleF.Empty;
-        _reactionStopwatch.Reset();
-        _writer = null;
-        _view.ShowStimulus(null, paintImmediately: false);
-
-        var session = new MeasurementSessionResult(Profile.SessionName, _currentResults.ToArray(), _sessionStartedAt, endedAt, status, _sessionMetadata);
-        _lastSessionStatus = status;
-        _lastSessionValidTrials = session.ValidTrialCount;
-        Logger.Info(
-            $"Mérés összegzés ({Profile.SessionName}): {session.ValidTrialCount}/{session.TestTrialCount} érvényes tesztpróba, "
-            + $"ESP átlag={FormatReaction(session.EspSummary?.MeanMs)}, medián={FormatReaction(session.EspSummary?.MedianMs)}; "
-            + $"PC átlag={FormatReaction(session.LocalSummary?.MeanMs)}, medián={FormatReaction(session.LocalSummary?.MedianMs)}.");
-        SessionEnded?.Invoke(this, new MeasurementSessionResultEventArgs(session));
-
-        if (closeError is not null)
-        {
-            _view.ShowSaveFailed(filePath, closeError);
-        }
-
-        RefreshView();
-    }
-
-    private async Task<ScanoutTrialParameters> PrepareScanoutTrialAsync(string trialLabel)
-    {
-        ScanoutTrialParameters? parameters = null;
-        await _view.InvokeAsync(() =>
-        {
-            PrepareStimulus();
-            var stage = _view.GetStageInfo();
-            parameters = ScanoutGeometry.CreateTrialParameters(
-                _stimulusRect,
-                stage.PhotodiodeBounds,
-                stage.StageScreenOrigin,
-                stage.ScreenBounds,
-                _geometry!.Timing);
-        }).ConfigureAwait(false);
-
-        return parameters
-            ?? throw new InvalidOperationException($"Nem sikerült előkészíteni a(z) {trialLabel}. próba scanout mérési paramétereit.");
-    }
-
-    private async Task ShowStimulusAfterForeperiodAsync(int foreperiodMs, CancellationToken cancellationToken)
-    {
-        await _view.InvokeAsync(() =>
-        {
-            _reactionStopwatch.Reset();
-
-            // A tekintet a próba teljes idejére (előperiódus + inger + válasz) rögzítésre kerül;
-            // a felvételt a RecordReaction zárja le.
-            _gazeTracker.BeginGazeRecording();
-            _view.ShowStimulus(null, paintImmediately: false);
-        }).ConfigureAwait(false);
-
-        await Task.Delay(foreperiodMs, cancellationToken).ConfigureAwait(false);
-
-        await _view.InvokeAsync(PresentStimulus).ConfigureAwait(false);
-    }
-
-    // UI-szálon: az inger és a fotodióda-jelző szinkron kirajzolása, majd rögtön utána az
-    // időbélyegek - így azok már a kirajzolás után készülnek.
-    private void PresentStimulus()
-    {
-        if (_stimulusRect.Width <= 0 || _stimulusRect.Height <= 0)
-        {
-            throw new InvalidOperationException("Az inger pozíciója nincs előkészítve.");
-        }
-
-        _view.ShowStimulus(_stimulusRect, paintImmediately: true);
-        _stimulusOnsetUs = _gazeTracker.GetSystemTimeStampUs();
-        _reactionStopwatch.Restart();
-    }
-
-    // Az excentricitás egyenletes eloszlású a [MinEccentricityDeg, elférő maximum] tartományban,
-    // az irány véletlen; ami nem fér el a mérőfelületen (vagy a fotodióda-jelzőhöz túl közel esne),
-    // azt újrasorsoljuk. A ténylegesen használt excentricitás minden próbánál mentésre kerül.
-    private void PrepareStimulus()
-    {
-        var geometry = _geometry ?? throw new InvalidOperationException("A mérés geometriája nincs előkészítve.");
-        var minEccentricity = Profile.Mode.MinEccentricityDeg;
-
-        for (var attempt = 0; attempt < MaxStimulusPlacementAttempts; attempt++)
-        {
-            double eccentricity;
-            double direction;
-            lock (_random)
-            {
-                eccentricity = minEccentricity + (_random.NextDouble() * (geometry.EffectiveMaxEccentricityDeg - minEccentricity));
-                direction = _random.NextDouble() * 2 * Math.PI;
-            }
-
-            if (TryCreateStimulusRect(geometry.VisualSpace, geometry.Stage.StageSize, eccentricity, direction, out var candidate))
-            {
-                _stimulusRect = candidate;
-                return;
-            }
-        }
-
-        throw new InvalidOperationException("Nem sikerült az ingert a beállított excentricitás-tartományban elhelyezni.");
-    }
-
-    // Ha az ESP a megengedett időn (ReactionTimeoutMs) belül nem küld értelmezhető választ, az nem
-    // kezelhető kommunikációs hibaként (nem szakíthatja meg a teljes mérést): egyszerű
-    // kimaradt/túl lassú reakció is előidézheti. Ilyenkor a TimedOut jelzővel térünk vissza, a
-    // próba érvénytelenként kerül rögzítésre, és a mérés a következő próbával folytatódik.
-    // A ResponseReceivedUs a válasz beérkezésének ideje a szemkövető óráján - ez zárja le a
-    // tekintet-kiértékelés válaszablakát (időtúllépésnél az időkorlát lejártának ideje).
-    private async Task<(double? EspReactionTimeMs, double? LocalReactionTimeMs, bool TimedOut, long ResponseReceivedUs)> WaitForReactionAsync(
-        IResponseDevice device,
-        CancellationToken cancellationToken)
-    {
-        var localReactionTimeMs = _reactionStopwatch.Elapsed.TotalMilliseconds;
-
-        try
-        {
-            var espReactionTimeMs = await device.WaitForReactionTimeMsAsync(
-                TimeSpan.FromMilliseconds(Profile.Mode.ReactionTimeoutMs),
-                cancellationToken).ConfigureAwait(false);
-
-            localReactionTimeMs = _reactionStopwatch.Elapsed.TotalMilliseconds;
-            var responseReceivedUs = _gazeTracker.GetSystemTimeStampUs();
-            _reactionStopwatch.Stop();
-
-            if (espReactionTimeMs is null)
-            {
-                Logger.Warning("[ESP] Nem érkezett reakcióidő-adat a megengedett időn belül, a próba érvénytelen.");
-                return (null, localReactionTimeMs, true, responseReceivedUs);
-            }
-
-            Logger.Info($"[ESP] Reakcióidő = {espReactionTimeMs:0.###} ms.");
-            return (espReactionTimeMs, localReactionTimeMs, false, responseReceivedUs);
-        }
-        catch (OperationCanceledException)
-        {
-            _reactionStopwatch.Stop();
-            return (null, null, false, 0);
-        }
-    }
-
-    // UI-szálon fut.
-    private void RecordReaction(TrialOutcome outcome)
-    {
-        var schedule = _schedule;
-        var geometry = _geometry;
-        if (!_isMeasurementRunning || schedule is null || geometry is null)
+        if (_runner is not { } runner || !runner.Context.GazeActive)
         {
             return;
         }
 
-        _reactionStopwatch.Reset();
-        _view.ShowStimulus(null, paintImmediately: false);
-
-        var gazeRecording = new TrialGazeRecording(
-            _stimulusOnsetUs,
-            outcome.ResponseWindowEndUs,
-            geometry.Stage.ScreenBounds,
-            _view.GetStageInfo().StageScreenOrigin,
-            _gazeTracker.EndGazeRecording());
-        var invalidReason = DetermineInvalidReason(outcome.TimedOut, gazeRecording, geometry.VisualSpace);
-        var stimulusCenter = new PointF(_stimulusRect.X + (_stimulusRect.Width / 2f), _stimulusRect.Y + (_stimulusRect.Height / 2f));
-
-        var result = new MeasurementResult
+        if (isConnected)
         {
-            Phase = outcome.Phase,
-            TrialNumber = outcome.TrialNumber,
-            TargetValidTrials = Profile.Mode.TestTrials,
-            EspReactionTimeMs = outcome.EspReactionTimeMs,
-            LocalReactionTimeMs = outcome.LocalReactionTimeMs,
-            RecordedAt = DateTime.Now,
-            InvalidReason = invalidReason,
-            ForeperiodMs = outcome.ForeperiodMs,
-            ScanoutCorrectionUs = outcome.ScanoutCorrectionUs,
-            StimulusBounds = _stimulusRect,
-            StimulusEccentricityDeg = geometry.VisualSpace.EccentricityDeg(stimulusCenter),
-            ValidGazeRatio = gazeRecording.ValidResponseWindowRatio,
-            GazeSamplesInWindow = gazeRecording.ResponseWindowSampleCount,
-            MeanEyeDistanceMm = gazeRecording.MeanEyeDistanceMm,
-            GazeRecording = gazeRecording
-        };
-        _currentResults.Add(result);
-        schedule.Record(outcome.Phase, result.Valid);
-        _lastResultText = $"ESP {FormatReaction(result.EspReactionTimeMs)} | PC {FormatReaction(result.LocalReactionTimeMs)}";
+            Logger.Info("[GAZE] A szemkövető kapcsolata mérés közben helyreállt.");
+            return;
+        }
 
+        runner.NotifyTrackerConnectionLost();
+        if (runner.Context.Rule.RequiresTracker)
+        {
+            Logger.Warning("[GAZE] A mérés leáll, mert a tekintet-ellenőrzéshez szemkövető kell.");
+            _measurementCts?.Cancel();
+        }
+    }
+
+    // UI-szálon, a mérés végén (befejezés, megszakítás, hiba).
+    private void EndSession(TrialRunner runner, SessionRunOutcome outcome)
+    {
+        var context = runner.Context;
+        var session = new MeasurementSessionResult(
+            context.SessionName, runner.Results.ToArray(), runner.StartedAt, outcome.EndedAt, outcome.Status, runner.Metadata);
+        _lastSession = new LastSessionSummary(
+            outcome.Status,
+            session.ValidTrialCount,
+            context.Settings.Trials.MeasuredTrials,
+            session.EspSummary?.MedianMs,
+            MissingEspTrials: session.TestTrials.Count(trial => trial.LocalReactionTimeMs.HasValue && !trial.EspReactionTimeMs.HasValue),
+            NoGazeDataTrials: session.Trials.Count(trial => trial.InvalidReason == TrialInvalidReason.TrackerUnavailable));
         Logger.Info(
-            $"[GAZE] {FormatTrialLabel(outcome.Phase, outcome.TrialNumber)}. próba: {gazeRecording.Samples.Count} minta, "
-            + $"ebből {gazeRecording.ResponseWindowSampleCount} a válaszablakban ({(outcome.ResponseWindowEndUs - _stimulusOnsetUs) / 1000d:0} ms), "
-            + $"érvényes arány {gazeRecording.ValidResponseWindowRatio:P0}, excentricitás {result.StimulusEccentricityDeg:0.0}°, eredmény: {invalidReason}.");
+            $"Mérés összegzés ({context.SessionName}): {session.ValidTrialCount}/{session.TestTrialCount} érvényes mért próba, "
+            + $"ESP átlag={TrialRunner.FormatReaction(session.EspSummary?.MeanMs)}, medián={TrialRunner.FormatReaction(session.EspSummary?.MedianMs)}; "
+            + $"PC átlag={TrialRunner.FormatReaction(session.LocalSummary?.MeanMs)}, medián={TrialRunner.FormatReaction(session.LocalSummary?.MedianMs)}.");
 
+        ResetSessionState();
+        SessionEnded?.Invoke(this, new MeasurementSessionResultEventArgs(session));
+        StartPostSessionLock();
+        RefreshView();
+
+        if (outcome.UnexpectedError is { } unexpected)
+        {
+            _view.ShowUnexpectedError(unexpected);
+        }
+
+        if (outcome.SaveError is { } saveError)
+        {
+            _view.ShowSaveFailed(runner.FilePath, saveError);
+        }
+
+        if (outcome.EspLoss is { } espLoss)
+        {
+            _view.ShowEspConnectionLost(espLoss.PortName, espLoss.TrialLabel, espLoss.Error);
+        }
+
+        if (runner.TrackerLostAtTrial is { } trackerLostAt)
+        {
+            _view.ShowTrackerConnectionLost(trackerLostAt, measurementAborted: context.Rule.RequiresTracker);
+        }
+    }
+
+    // UI-szálon: a gombok a PostSessionLockDuration leteltéig tiltottak (lásd ott).
+    private void StartPostSessionLock()
+    {
+        _isPostSessionLocked = true;
+        _ = ReleasePostSessionLockAsync();
+    }
+
+    private async Task ReleasePostSessionLockAsync()
+    {
         try
         {
-            _writer?.AppendTrial(result);
+            await Task.Delay(PostSessionLockDuration).ConfigureAwait(false);
+            await _view.InvokeAsync(() =>
+            {
+                _isPostSessionLocked = false;
+                RefreshView();
+            }).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException)
+        catch (Exception ex)
         {
-            Logger.Error("A próba mentése sikertelen, a mérés leáll.", ex);
-            _measurementCts?.Cancel();
-            _view.ShowSaveFailed(_writer?.FilePath ?? _repository.MeasurementsDirectory, ex);
+            // Pl. az alkalmazás bezárásakor a nézet már megszűnt.
+            Logger.Error("A mérés utáni zárolás feloldása a felületen nem sikerült.", ex);
         }
-
-        RefreshView();
     }
 
-    private TrialInvalidReason DetermineInvalidReason(bool timedOut, TrialGazeRecording gazeRecording, StageVisualSpace visualSpace)
-    {
-        if (timedOut)
-        {
-            return TrialInvalidReason.Timeout;
-        }
-
-        if (!_gazeTracker.IsTrackerAvailable)
-        {
-            return TrialInvalidReason.TrackerUnavailable;
-        }
-
-        if (gazeRecording.ResponseWindowSampleCount == 0
-            || gazeRecording.ValidResponseWindowRatio < _settings.MinValidGazeSampleRatio)
-        {
-            return TrialInvalidReason.InsufficientGazeData;
-        }
-
-        return _mode.IsGazeValid(gazeRecording.ValidResponseWindowPoints, _stimulusRect, visualSpace, Profile.Mode)
-            ? TrialInvalidReason.None
-            : TrialInvalidReason.GazeViolation;
-    }
-
+    // UI-szálon: a futó mérés leállítása és megvárása (a TrialRunner lezárja az ESP-t és a fájlt, majd az
+    // EndSession a felületet). A CancellationTokenSource-t csak a UI-szál éri el, így a megszakítás és a
+    // felszabadítás nem versenyezhet.
     private async Task StopMeasurementAsync()
     {
         _measurementCts?.Cancel();
-
-        if (_measurementTask is not null)
+        if (_measurementTask is { } task)
         {
-            try
-            {
-                await _measurementTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
+            await task;
             _measurementTask = null;
         }
 
         _measurementCts?.Dispose();
         _measurementCts = null;
-
-        await DisposeDeviceAsync().ConfigureAwait(false);
-
-        _gazeTracker.CancelGazeRecording();
-
-        await _view.InvokeAsync(() =>
-        {
-            if (_manageTrackingLifecycle)
-            {
-                _gazeTracker.StopTracking();
-            }
-
-            _isMeasurementRunning = false;
-            _stimulusRect = RectangleF.Empty;
-            _reactionStopwatch.Reset();
-            _view.ShowStimulus(null, paintImmediately: false);
-            RefreshView();
-        }).ConfigureAwait(false);
+        ResetSessionState();
+        RefreshView();
     }
 
-    private async Task DisposeDeviceAsync()
+    // UI-szálon: a futó mérés állapotának törlése. A követést csak akkor állítja le, ha a presenter kezeli
+    // az életciklusát.
+    private void ResetSessionState()
     {
-        var device = Interlocked.Exchange(ref _device, null);
-        if (device is not null)
+        if (_runner is not null && _manageTrackingLifecycle)
         {
-            await device.DisposeAsync().ConfigureAwait(false);
+            _gazeTracker.StopTracking();
         }
+
+        _runner = null;
+        _view.ShowStimulus(null, paintImmediately: false);
     }
 
-    // Nyugalmi állapotban a résztvevő látja az instrukciót (vagy az előző mérés kimenetelét). Mérés
-    // közben a szöveg rejtve van és az egérmutató sem látszik: a mérőfelületen csak a fixációs
-    // kereszt, az inger és a fotodióda-jelző van, a haladást pedig az alsó sáv mutatja - így
-    // semmilyen szövegváltozás nem eshet egybe az inger megjelenésével. UI-szálon hívandó.
+    private static Color ParseColor(string text)
+    {
+        // Az ExperimentSettings.Validate() után mindig sikerül.
+        return HexColor.TryParse(text, out var color)
+            ? color
+            : throw new InvalidOperationException($"Érvénytelen szín a beállításokban: {text}");
+    }
+
+    // A nézet teljes állapota; UI-szálon hívandó, és sosem kérdezi le a nézetet. Nyugalmi állapotban
+    // az előtér látszik: a résztvevőnek szóló instrukció, a kutatónak szóló összefoglaló a
+    // beállításokról (vagy a beállítási hiba) és az előző mérés kimenetele. Mérés közben a nézet csak a
+    // mérési jelenetet mutatja (háttér, fixációs kereszt, inger, fotodióda-jelző): semmilyen szöveg nem
+    // látszik, így szövegváltozás sem eshet egybe az inger megjelenésével. Az egérmutató csak ingerre
+    // kattintós módban látszik, mert ott célozni kell vele.
     private void RefreshView()
     {
-        var progressText = _schedule?.ProgressText ?? $"Érvényes 0/{Profile.Mode.TestTrials}";
-        string startButtonText;
-        if (_isTransitioning)
-        {
-            startButtonText = _transitionText;
-        }
-        else if (_isMeasurementRunning)
-        {
-            startButtonText = $"Mérés folyamatban – {progressText}";
-        }
-        else
-        {
-            startButtonText = _lastSessionStatus is null ? "Mérés indítása" : "Új mérés indítása";
-        }
+        var startButtonText = _isTransitioning
+            ? _transitionText
+            : _lastSession is null ? "Mérés indítása" : "Új mérés indítása";
+
+        var session = _runner?.Context;
+        var scene = session is null
+            ? null
+            : new MeasurementScene(session.BackgroundColor, session.StimulusColor, session.Geometry.FixationPoint, session.ClickOnStimulus);
 
         _view.ApplyState(new MeasurementViewState(
-            IsRunning: _isMeasurementRunning,
-            IsBusy: _isTransitioning,
+            IsRunning: session is not null,
+            IsBusy: _isTransitioning || _isPostSessionLocked,
             StartButtonText: startButtonText,
-            InstructionText: BuildIdleText(),
-            ProgressText: progressText,
-            LastResultText: _lastResultText,
-            FixationCrossSizePx: Profile.FixationCrossSizePx,
-            FixationCrossThicknessPx: Profile.FixationCrossThicknessPx));
+            InstructionText: LobbyText.BuildInstruction(_lobbySettings, _lobbyRule),
+            SettingsSummaryText: LobbyText.BuildSettingsSummary(_lobbySettings, _lobbyError),
+            StatusText: LobbyText.BuildStatus(_lastSession),
+            Scene: scene,
+            PhotodiodeMarkerCenter: (session?.Settings ?? _lobbySettings).Hardware.PhotodiodeMarkerCenter));
     }
-
-    private string BuildIdleText()
-    {
-        var mode = Profile.Mode;
-        return _lastSessionStatus switch
-        {
-            SessionStatus.Completed =>
-                $"A mérés elkészült ({_lastSessionValidTrials} érvényes próba). Indíthatsz új mérést, vagy visszaléphetsz a menübe.",
-            SessionStatus.AttemptLimitReached =>
-                $"A mérés véget ért, de a próbálkozási korlát miatt csak {_lastSessionValidTrials} érvényes próba gyűlt össze a kívánt {mode.TestTrials}-ből. Az adatok elmentve.",
-            SessionStatus.Aborted or SessionStatus.Interrupted =>
-                $"A mérés megszakadt; az eddigi próbák elmentve ({_lastSessionValidTrials} érvényes). Indíthatsz új mérést.",
-            _ => Profile.IdleInstructionText
-                + (mode.PracticeTrials > 0 ? $" Először {mode.PracticeTrials} gyakorló próba következik, ezek nem számítanak bele az eredménybe." : string.Empty)
-                + " (Megszakítás: Esc)"
-        };
-    }
-
-    private static string FormatTrialLabel(TrialPhase phase, int trialNumber)
-    {
-        return phase == TrialPhase.Practice ? $"Gy{trialNumber}" : trialNumber.ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatReaction(double? value)
-    {
-        return value.HasValue ? $"{value.Value:0} ms" : "-";
-    }
-
-    // A mérés elején rögzített kijelző- és nézési geometria.
-    private sealed record SessionGeometry(
-        StageInfo Stage,
-        PhysicalDisplaySize DisplaySize,
-        double PixelsPerMm,
-        double ViewingDistanceMm,
-        string ViewingDistanceSource,
-        DisplayTiming Timing,
-        StageVisualSpace VisualSpace,
-        double EffectiveMaxEccentricityDeg);
-
-    private readonly record struct TrialOutcome(
-        TrialPhase Phase,
-        int TrialNumber,
-        int ForeperiodMs,
-        string ScanoutCorrectionUs,
-        double? EspReactionTimeMs,
-        double? LocalReactionTimeMs,
-        bool TimedOut,
-        long ResponseWindowEndUs);
 }

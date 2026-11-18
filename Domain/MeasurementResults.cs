@@ -6,25 +6,45 @@ public enum TrialInvalidReason
 {
     None,
     Timeout,
+
+    // Elsietett válasz: a résztvevő már az inger megjelenése előtt (az előperiódus alatt) kattintott,
+    // vagy a reakcióidő rövidebb a ReactionTimeLimits.AnticipationThresholdMs értéknél - ilyen gyorsan
+    // az ingerre nem lehet reagálni, a válasz találgatás volt.
+    Anticipation,
     TrackerUnavailable,
     InsufficientGazeData,
     GazeViolation,
+
+    // Ingerre kattintós módban (ResponseMode.ClickOnStimulus) a kattintás nem az ingerre esett.
+    MissedStimulus,
     Unspecified
 }
 
 public enum SessionStatus
 {
-    // Összegyűlt a kívánt számú érvényes tesztpróba.
+    // Minden tervezett próba lefutott (a 2-es és régebbi formátumú fájlokban: összegyűlt a kívánt
+    // számú érvényes tesztpróba).
     Completed,
 
-    // Elfogyott a megengedett próbálkozás, mielőtt összegyűlt volna a kívánt számú érvényes próba.
+    // Csak a 2-es és régebbi formátumú fájlokban fordul elő: az érvénytelen próbák pótlása közben
+    // elfogyott a megengedett próbálkozás. A mérés az érvénytelen próbákat nem pótolja, ezért ilyen
+    // állapotot nem ad.
     AttemptLimitReached,
 
-    // A mérést megszakították (Esc, visszalépés, ESP-hiba, mentési hiba).
+    // A mérést megszakították (Esc, visszalépés, mentési hiba). Az ESP kiesése nem szakítja meg: a
+    // mérés nélküle, ESP-reakcióidő nélkül fejeződik be.
     Aborted,
 
     // A fájlnak nincs lezáró sora: a program a mérés közben leállt (pl. összeomlás, áramszünet).
     Interrupted
+}
+
+// A reakcióidő elfogadhatóságának határai.
+public static class ReactionTimeLimits
+{
+    // Egyszerű vizuális reakcióidő ennél rövidebb nem lehet: az ennél gyorsabb válasz az inger
+    // megjelenésére való találgatás (anticipáció), nem reakció. A szakirodalomban szokásos 100 ms-os határ.
+    public const double AnticipationThresholdMs = 100;
 }
 
 public sealed class MeasurementResult
@@ -34,12 +54,23 @@ public sealed class MeasurementResult
     // A próba sorszáma a fázisán (gyakorló / teszt) belül.
     public required int TrialNumber { get; init; }
 
-    // A kívánt érvényes tesztpróbák száma a mérésben.
-    public required int TargetValidTrials { get; init; }
+    // A mérés tervezett mért (teszt) próbáinak száma (Trials.MeasuredTrials). A 2-es és régebbi
+    // formátumú fájlokban ez az oszlop a kívánt ÉRVÉNYES tesztpróbák számát jelentette (az érvénytelenek
+    // helyett akkor újabb próba jött), az 1-esben az összes próba számát.
+    public required int PlannedTestTrials { get; init; }
 
+    // Az ESP által (fotodióda + válaszgomb) mért reakcióidő; null időtúllépésnél, vagy ha az ESP nem
+    // válaszolt az RTIME kérésre.
     public double? EspReactionTimeMs { get; init; }
 
+    // A PC-n mért idő az inger kirajzolásától az operációs rendszer által érzékelt kattintásig; null
+    // időtúllépésnél.
     public double? LocalReactionTimeMs { get; init; }
+
+    // A PC-n és az ESP által mért idő különbsége (PC - ESP), vagyis a rendszer késleltetése (a kirajzolás
+    // és a megjelenés, illetve a gombnyomás és az egérüzenet feldolgozása közti idő); null, ha bármelyik
+    // hiányzik.
+    public double? LocalMinusEspMs => LocalReactionTimeMs - EspReactionTimeMs;
 
     public required DateTime RecordedAt { get; init; }
 
@@ -47,19 +78,31 @@ public sealed class MeasurementResult
 
     public bool Valid => InvalidReason == TrialInvalidReason.None;
 
-    // Az inger előtti várakozási idő (előperiódus), ms.
+    // Az inger előtti TERVEZETT várakozási idő (előperiódus), ms.
     public int? ForeperiodMs { get; init; }
 
-    public string? ScanoutCorrectionUs { get; init; }
+    // A ténylegesen eltelt előperiódus (a várakozás kezdetétől az inger kirajzolásáig), ms. Az
+    // időzítő felbontása és a UI-szál terhelése miatt valamivel hosszabb a tervezettnél.
+    public double? ActualForeperiodMs { get; init; }
+
+    // Az előperiódus alatti (az inger megjelenése előtti) kattintások száma ebben a próbában.
+    public int? PrematureClicks { get; init; }
+
+    // Az ESP-nek elküldött scanout-korrekció (µs): az inger és a fotodióda-jelző sora közti kirajzolási idő.
+    public double? ScanoutCorrectionUs { get; init; }
 
     // Az inger helye a mérőfelület koordinátáiban - a tekintetminták (StageX/StageY) is ebben
     // a koordináta-rendszerben kerülnek mentésre, így a tekintet alapú döntés utólag ellenőrizhető.
     public RectangleF? StimulusBounds { get; init; }
 
-    // Az inger középpontjának távolsága a fixációs kereszttől, látószögben.
-    public double? StimulusEccentricityDeg { get; init; }
+    // Az inger középpontjának távolsága a fixációs ponttól, képpontban (a mérőfelület koordinátáiban).
+    public double? StimulusEccentricityPx { get; init; }
 
-    // A válaszablak (inger megjelenése -> válasz) érvényes tekintetmintáinak aránya (0..1).
+    // A válaszkattintás helye a mérőfelület koordinátáiban (mindkét válaszmódban); null időtúllépésnél.
+    public PointF? ClickPoint { get; init; }
+
+    // A válaszablak (inger megjelenése -> válasz) érvényes tekintetmintáinak aránya (0..1). Ez és a
+    // további tekintetadatok null-ok, ha a mérés szemkövető nélkül futott.
     public double? ValidGazeRatio { get; init; }
 
     public int? GazeSamplesInWindow { get; init; }
@@ -101,9 +144,12 @@ public sealed class MeasurementSessionResult
 
     public SessionStatus Status { get; }
 
-    // A mérés körülményei (kijelző, nézési távolság, beállítások, programverzió ...), lásd
+    // A mérés körülményei (kijelző, képidőzítés, beállítások, programverzió ...), lásd
     // MeasurementSessionWriter.
     public IReadOnlyDictionary<string, string> Metadata { get; }
+
+    // A beolvasáskor kihagyott (hibás vagy csonka) próbasorok száma; frissen mért mérésnél 0.
+    public int SkippedRowCount { get; init; }
 
     public IEnumerable<MeasurementResult> TestTrials => Trials.Where(trial => trial.Phase == TrialPhase.Test);
 
@@ -112,11 +158,14 @@ public sealed class MeasurementSessionResult
     public int ValidTrialCount => TestTrials.Count(trial => trial.Valid);
 
     // Az összesítésbe csak az érvényes TESZTpróbák számítanak: a gyakorló próbák és az érvénytelenek
-    // (tekintethiba, időtúllépés, pl. a kb. 3000 ms-os időkorlát) nem torzíthatják az eredményt.
+    // (tekintethiba, elsietett válasz, időtúllépés) nem torzíthatják az eredményt.
     // Null, ha nincs egyetlen érvényes, mért értékkel rendelkező próba sem.
     public ReactionTimeSummary? EspSummary => Summarize(trial => trial.EspReactionTimeMs);
 
     public ReactionTimeSummary? LocalSummary => Summarize(trial => trial.LocalReactionTimeMs);
+
+    // A PC - ESP különbség összesítése: csak azokból az érvényes tesztpróbákból, amelyekben mindkét idő megvan.
+    public ReactionTimeSummary? DifferenceSummary => Summarize(trial => trial.LocalMinusEspMs);
 
     private ReactionTimeSummary? Summarize(Func<MeasurementResult, double?> selector)
     {

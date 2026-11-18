@@ -41,9 +41,11 @@ static class Program
             ErrorPopup.ShowGeneral(null, eventArgs.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             ErrorPopup.ShowGeneral(null, eventArgs.ExceptionObject as Exception);
+        // A meg nem figyelt Task-kivétel a szemétgyűjtő szálán, tetszőleges pillanatban érkezik (akár egy
+        // próba közben, a résztvevő előtt), ezért felugró ablak helyett csak a naplóba kerül.
         TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
         {
-            ErrorPopup.ShowGeneral(null, eventArgs.Exception);
+            Logger.Error("Meg nem figyelt Task-kivétel.", eventArgs.Exception);
             eventArgs.SetObserved();
         };
 
@@ -61,7 +63,7 @@ static class Program
 
         try
         {
-            Application.Run(new MainMenu(dependencies));
+            Application.Run(new MainForm(dependencies));
         }
         catch (Exception ex)
         {
@@ -70,6 +72,9 @@ static class Program
         finally
         {
             Logger.Info("Alkalmazás bezárva.");
+            // A sorban álló naplósorok kiírása; ami ezután jön (pl. a Tobii-szolgáltatás felszabadítása),
+            // az közvetlenül íródik a naplóba.
+            Logger.Shutdown();
         }
     }
 }

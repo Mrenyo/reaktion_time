@@ -1,0 +1,22 @@
+# ESP32-S3-N16R8: 16 MB Quad flash, 8 MB Octal PSRAM
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM (Octal, 80 MHz)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# 240 MHz-es processzor-órajel (az alapértelmezés 160 MHz): rövidebb mérő ciklus
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 1 ms-os FreeRTOS tick
+CONFIG_FREERTOS_HZ=1000
+
+# A GPIO olvasó task folyamatosan fut az 1-es magon (mint az Arduino loop()),
+# ezért ott nem figyeljük az üresjárati taskot
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set

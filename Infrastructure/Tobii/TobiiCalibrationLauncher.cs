@@ -4,56 +4,66 @@ using Tobii.Research;
 
 namespace ReactionTimeMeasurementApp.Infrastructure.Tobii;
 
+// A felhasználói kalibrációt a Tobii Pro Eye Tracker Manager parancssori módja végzi. Hiba vagy
+// megszakítás esetén InvalidOperationException-t dob (a kalibrációs nézet ezt "sikertelen
+// kalibrációként" jeleníti meg), hiányzó telepítésnél FileNotFoundException-t.
 internal static class TobiiCalibrationLauncher
 {
-    internal static int RunUserCalibration(IEyeTracker eyeTracker, int? screenNumber = null)
+    private const string ExecutableName = "TobiiProEyeTrackerManager.exe";
+    private const int ExitCodeNotFound = 44;
+
+    // A kalibráció interaktív (a résztvevő tempójában halad), ezért bőkezű a korlát; csak arra
+    // szolgál, hogy egy lefagyott Eye Tracker Manager ne tartsa örökre a háttérszálat.
+    private static readonly TimeSpan CalibrationTimeout = TimeSpan.FromMinutes(10);
+
+    // A kilépés után a kimenet maradékára ennyit várunk: ha egy gyerekfolyamat örökölte a csöveket,
+    // azok a fő folyamat kilépése után is nyitva maradhatnak.
+    private static readonly TimeSpan OutputDrainTimeout = TimeSpan.FromSeconds(5);
+
+    internal static int RunUserCalibration(IEyeTracker eyeTracker)
     {
         ArgumentNullException.ThrowIfNull(eyeTracker);
 
         var executablePath = FindEyeTrackerManagerExecutable();
-        var screenArg = screenNumber.HasValue ? $" --screen={screenNumber.Value}" : string.Empty;
-        var candidates = new List<string>();
+        var deviceArgs = new[]
+            {
+                (Name: "device-sn", Value: eyeTracker.SerialNumber),
+                (Name: "device-address", Value: eyeTracker.Address?.ToString())
+            }
+            .Where(arg => !string.IsNullOrWhiteSpace(arg.Value))
+            .Select(arg => $"--mode=usercalibration --{arg.Name}=\"{arg.Value}\"")
+            .ToList();
 
-        if (!string.IsNullOrWhiteSpace(eyeTracker.SerialNumber))
-        {
-            candidates.Add($"--mode=usercalibration --device-sn=\"{eyeTracker.SerialNumber}\"{screenArg}");
-        }
-
-        var deviceAddress = eyeTracker.Address?.ToString();
-        if (!string.IsNullOrWhiteSpace(deviceAddress))
-        {
-            candidates.Add($"--mode=usercalibration --device-address=\"{deviceAddress}\"{screenArg}");
-        }
-
-        if (candidates.Count == 0)
+        if (deviceArgs.Count == 0)
         {
             throw new InvalidOperationException("A Tobii eszközhöz nem tartozik használható sorozatszám vagy cím.");
         }
 
+        // Ha az Eye Tracker Manager sorozatszám alapján nem találja az eszközt (44), a címmel is
+        // megpróbáljuk; minden más hiba azonnal végleges.
         InvalidOperationException? lastError = null;
-
-        foreach (var args in candidates.Distinct())
+        foreach (var args in deviceArgs)
         {
-            var result = RunProcess(executablePath, args);
-            if (result.ExitCode == 0)
+            var (exitCode, stdOut, stdErr) = RunProcess(executablePath, args);
+            if (exitCode == 0)
             {
                 Logger.Info($"Tobii kalibráció sikeres. Args: {args}");
-                return result.ExitCode;
+                return exitCode;
             }
 
-            Logger.Warning(
-                $"Tobii Pro Eye Tracker Manager hiba. ExitCode={result.ExitCode} ({GetExitCodeDescription(result.ExitCode)}) Args: {args}");
+            var description = $"Tobii Pro Eye Tracker Manager hiba. ExitCode={exitCode} ({GetExitCodeDescription(exitCode)})";
+            Logger.Warning($"{description} Args: {args}");
 
             lastError = new InvalidOperationException(
-                $"Tobii Pro Eye Tracker Manager hiba. ExitCode={result.ExitCode} ({GetExitCodeDescription(result.ExitCode)}){Environment.NewLine}Args: {args}{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StdOut}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StdErr}");
+                $"{description}{Environment.NewLine}Args: {args}{Environment.NewLine}STDOUT:{Environment.NewLine}{stdOut}{Environment.NewLine}STDERR:{Environment.NewLine}{stdErr}");
 
-            if (result.ExitCode != 44)
+            if (exitCode != ExitCodeNotFound)
             {
-                throw lastError;
+                break;
             }
         }
 
-        throw lastError ?? new InvalidOperationException("A Tobii kalibráció indítása sikertelen volt.");
+        throw lastError!;
     }
 
     private static (int ExitCode, string StdOut, string StdErr) RunProcess(string executablePath, string args)
@@ -73,10 +83,35 @@ internal static class TobiiCalibrationLauncher
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
 
-        process.WaitForExit();
+        if (!process.WaitForExit(CalibrationTimeout))
+        {
+            Logger.Warning($"A Tobii Pro Eye Tracker Manager {CalibrationTimeout.TotalMinutes:0} perc alatt sem lépett ki, leállítjuk. Args: {args}");
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception e) when (e is InvalidOperationException || e is System.ComponentModel.Win32Exception || e is NotSupportedException)
+            {
+                Logger.Warning($"Az Eye Tracker Manager leállítása sikertelen: {e.Message}");
+            }
 
-        return (process.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
+            throw new InvalidOperationException(
+                $"A Tobii Pro Eye Tracker Manager {CalibrationTimeout.TotalMinutes:0} perc alatt sem fejezte be a kalibrációt, ezért leállítottuk.{Environment.NewLine}Args: {args}");
+        }
+
+        try
+        {
+            Task.WaitAll([stdoutTask, stderrTask], OutputDrainTimeout);
+        }
+        catch (AggregateException)
+        {
+            // A kimenet csak a naplóhoz kell; olvasási hibánál üresen marad.
+        }
+
+        return (process.ExitCode, ResultOrEmpty(stdoutTask), ResultOrEmpty(stderrTask));
     }
+
+    private static string ResultOrEmpty(Task<string> task) => task.IsCompletedSuccessfully ? task.Result : string.Empty;
 
     private static string GetExitCodeDescription(int exitCode)
     {
@@ -87,7 +122,7 @@ internal static class TobiiCalibrationLauncher
             31 => "EXIT_ERROR_CALIBRATION_FAILED",
             32 => "EXIT_ERROR_DISPLAYAREA_FAILED",
             33 => "EXIT_ERROR_DISPLAY_AREA_NOT_SET",
-            44 => "EXIT_ERROR_NOT_FOUND",
+            ExitCodeNotFound => "EXIT_ERROR_NOT_FOUND",
             51 => "EXIT_ERROR_INVALID_ARGUMENT",
             52 => "EXIT_ERROR_MISSING_ARGUMENT",
             53 => "EXIT_ERROR_UNKNOWN_MODE",
@@ -95,50 +130,38 @@ internal static class TobiiCalibrationLauncher
         };
     }
 
+    // Keresési sorrend: az újabb telepítő helye (Programs\...\app-<verzió>, majd közvetlenül a
+    // mappában), végül a régi telepítőé (...\app<verzió>). Mindkét helyen a legújabb verzió az első.
     private static string FindEyeTrackerManagerExecutable()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
         var programsBase = Path.Combine(localAppData, "Programs", "TobiiProEyeTrackerManager");
-        if (Directory.Exists(programsBase))
-        {
-            var appDir = Directory.EnumerateDirectories(programsBase, "app-*")
-                .OrderByDescending(path => path)
-                .FirstOrDefault();
-
-            if (appDir != null)
-            {
-                var exe = Path.Combine(appDir, "TobiiProEyeTrackerManager.exe");
-                if (File.Exists(exe))
-                {
-                    return exe;
-                }
-            }
-
-            var directExe = Path.Combine(programsBase, "TobiiProEyeTrackerManager.exe");
-            if (File.Exists(directExe))
-            {
-                return directExe;
-            }
-        }
-
         var legacyBase = Path.Combine(localAppData, "TobiiProEyeTrackerManager");
-        if (Directory.Exists(legacyBase))
-        {
-            var appDir = Directory.EnumerateDirectories(legacyBase, "app*")
-                .FirstOrDefault();
 
-            if (appDir != null)
-            {
-                var exe = Path.Combine(appDir, "TobiiProEyeTrackerManager.exe");
-                if (File.Exists(exe))
-                {
-                    return exe;
-                }
-            }
-        }
+        var directories = AppDirectoriesNewestFirst(programsBase)
+            .Append(programsBase)
+            .Concat(AppDirectoriesNewestFirst(legacyBase));
 
-        throw new FileNotFoundException(
-            "Nem található a Tobii Pro Eye Tracker Manager executable. Ellenőrizd, hogy telepítve van-e.");
+        return directories.Select(directory => Path.Combine(directory, ExecutableName)).FirstOrDefault(File.Exists)
+            ?? throw new FileNotFoundException(
+                "Nem található a Tobii Pro Eye Tracker Manager executable. Ellenőrizd, hogy telepítve van-e.");
+    }
+
+    // A verziók szám szerint rendezve (az "app-2.10.0" újabb, mint az "app-2.9.0"); az értelmezhetetlen
+    // nevűek a végére kerülnek, egymás közt név szerint csökkenő sorrendben.
+    private static IEnumerable<string> AppDirectoriesNewestFirst(string baseDirectory)
+    {
+        return Directory.Exists(baseDirectory)
+            ? Directory.EnumerateDirectories(baseDirectory, "app*")
+                .OrderByDescending(ParseAppVersion)
+                .ThenByDescending(path => path, StringComparer.OrdinalIgnoreCase)
+            : [];
+    }
+
+    private static Version ParseAppVersion(string appDirectory)
+    {
+        var name = Path.GetFileName(appDirectory);
+        var versionText = name.StartsWith("app", StringComparison.OrdinalIgnoreCase) ? name[3..].TrimStart('-') : name;
+        return Version.TryParse(versionText, out var version) ? version : new Version(0, 0);
     }
 }

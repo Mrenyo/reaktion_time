@@ -15,10 +15,11 @@
         private DataGridViewTextBoxColumn trialColumn;
         private DataGridViewTextBoxColumn espTimeColumn;
         private DataGridViewTextBoxColumn localTimeColumn;
+        private DataGridViewTextBoxColumn differenceColumn;
         private DataGridViewTextBoxColumn statusColumn;
         private Panel averagePanel;
         private Label averageCaptionLabel;
-        private Label averageValueLabel;
+        private Label summaryValueLabel;
         private Label totalTrialsLabel;
         private Button backButton;
 
@@ -46,10 +47,11 @@
             trialColumn = new DataGridViewTextBoxColumn();
             espTimeColumn = new DataGridViewTextBoxColumn();
             localTimeColumn = new DataGridViewTextBoxColumn();
+            differenceColumn = new DataGridViewTextBoxColumn();
             statusColumn = new DataGridViewTextBoxColumn();
             averagePanel = new Panel();
             averageCaptionLabel = new Label();
-            averageValueLabel = new Label();
+            summaryValueLabel = new Label();
             totalTrialsLabel = new Label();
             backButton = new Button();
             rootLayout.SuspendLayout();
@@ -95,8 +97,8 @@
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 6F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 2F));
-            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
-            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 52F));
+            contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 14F));
             contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 8F));
             contentLayout.Size = new Size(973, 754);
             contentLayout.TabIndex = 0;
@@ -181,7 +183,7 @@
             resultsGrid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
             resultsGrid.ColumnHeadersHeight = 52;
             resultsGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            resultsGrid.Columns.AddRange(new DataGridViewColumn[] { trialColumn, espTimeColumn, localTimeColumn, statusColumn });
+            resultsGrid.Columns.AddRange(new DataGridViewColumn[] { trialColumn, espTimeColumn, localTimeColumn, differenceColumn, statusColumn });
             resultsGrid.Dock = DockStyle.Fill;
             resultsGrid.EnableHeadersVisualStyles = false;
             resultsGrid.GridColor = Color.FromArgb(238, 236, 234);
@@ -200,7 +202,7 @@
             // 
             // trialColumn
             // 
-            trialColumn.FillWeight = 18F;
+            trialColumn.FillWeight = 14F;
             trialColumn.HeaderText = "Mérés";
             trialColumn.Name = "trialColumn";
             trialColumn.ReadOnly = true;
@@ -208,7 +210,7 @@
             // 
             // espTimeColumn
             // 
-            espTimeColumn.FillWeight = 26F;
+            espTimeColumn.FillWeight = 22F;
             espTimeColumn.HeaderText = "ESP idő (ms)";
             espTimeColumn.Name = "espTimeColumn";
             espTimeColumn.ReadOnly = true;
@@ -216,15 +218,23 @@
             // 
             // localTimeColumn
             // 
-            localTimeColumn.FillWeight = 26F;
-            localTimeColumn.HeaderText = "Helyi idő (ms)";
+            localTimeColumn.FillWeight = 22F;
+            localTimeColumn.HeaderText = "PC idő (ms)";
             localTimeColumn.Name = "localTimeColumn";
             localTimeColumn.ReadOnly = true;
             localTimeColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+            //
+            // differenceColumn
+            //
+            differenceColumn.FillWeight = 22F;
+            differenceColumn.HeaderText = "PC − ESP (ms)";
+            differenceColumn.Name = "differenceColumn";
+            differenceColumn.ReadOnly = true;
+            differenceColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
             // 
             // statusColumn
             // 
-            statusColumn.FillWeight = 30F;
+            statusColumn.FillWeight = 26F;
             statusColumn.HeaderText = "Státusz";
             statusColumn.Name = "statusColumn";
             statusColumn.ReadOnly = true;
@@ -234,7 +244,7 @@
             // 
             averagePanel.BackColor = Color.FromArgb(250, 243, 230);
             averagePanel.Controls.Add(totalTrialsLabel);
-            averagePanel.Controls.Add(averageValueLabel);
+            averagePanel.Controls.Add(summaryValueLabel);
             averagePanel.Controls.Add(averageCaptionLabel);
             averagePanel.Dock = DockStyle.Fill;
             averagePanel.Location = new Point(56, 634);
@@ -254,16 +264,16 @@
             averageCaptionLabel.TabIndex = 0;
             averageCaptionLabel.Text = "Összesítés";
             //
-            // averageValueLabel
+            // summaryValueLabel
             //
-            averageValueLabel.AutoSize = true;
-            averageValueLabel.Font = new Font("Segoe UI Semibold", 11.5F, FontStyle.Bold, GraphicsUnit.Point, 238);
-            averageValueLabel.ForeColor = Color.FromArgb(255, 91, 24);
-            averageValueLabel.Location = new Point(192, 5);
-            averageValueLabel.Name = "averageValueLabel";
-            averageValueLabel.Size = new Size(15, 21);
-            averageValueLabel.TabIndex = 1;
-            averageValueLabel.Text = "-";
+            summaryValueLabel.AutoSize = true;
+            summaryValueLabel.Font = new Font("Segoe UI Semibold", 11.5F, FontStyle.Bold, GraphicsUnit.Point, 238);
+            summaryValueLabel.ForeColor = Color.FromArgb(255, 91, 24);
+            summaryValueLabel.Location = new Point(192, 5);
+            summaryValueLabel.Name = "summaryValueLabel";
+            summaryValueLabel.Size = new Size(15, 21);
+            summaryValueLabel.TabIndex = 1;
+            summaryValueLabel.Text = "-";
             // 
             // totalTrialsLabel
             // 

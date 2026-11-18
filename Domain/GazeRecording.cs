@@ -90,8 +90,9 @@ public sealed class TrialGazeRecording
     // sem esett (pl. a szemkövető nem küldött adatot), az értéke 0.
     public double ValidResponseWindowRatio { get; }
 
-    // A szem átlagos távolsága a kijelző síkjától a válaszablakban (mm); null, ha nem ismert.
-    // Ebből utólag ellenőrizhető, mennyit mozdult el a résztvevő a mérés elején mért távolsághoz képest.
+    // A szem átlagos távolsága a kijelző síkjától a válaszablakban (mm); null, ha nem ismert. A
+    // metaadatokban rögzített kijelzőmérettel együtt ebből utólag kiszámítható az inger látószöge, és
+    // látszik, mennyit mozdult a résztvevő a mérés során.
     public double? MeanEyeDistanceMm { get; }
 
     public bool IsInResponseWindow(GazeSample sample)

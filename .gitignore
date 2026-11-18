@@ -484,3 +484,4 @@ $RECYCLE.BIN/
 # Projekt-specifikus
 _build_check/
 .agents/
+.serena/

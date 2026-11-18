@@ -1,0 +1,8 @@
+# Sorvegek: a munkafaban a platform szerinti, a repoban LF.
+* text=auto
+
+*.cs   text diff=csharp
+*.md   text
+*.json text
+*.sln  text eol=crlf
+*.png  binary

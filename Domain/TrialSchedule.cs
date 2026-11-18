@@ -1,4 +1,4 @@
-﻿namespace ReactionTimeMeasurementApp.Domain;
+namespace ReactionTimeMeasurementApp.Domain;
 
 public enum TrialPhase
 {
@@ -6,52 +6,37 @@ public enum TrialPhase
     Test
 }
 
-// A próbák sorrendje: először a gyakorló próbák, utána a tesztpróbák. Ha az érvénytelen
-// tesztpróbák ismétlése be van kapcsolva, addig jön új próba, amíg össze nem gyűlik a kívánt
-// számú érvényes (legfeljebb MaxTestAttempts próbálkozásig).
+// A próbák sorrendje: először a gyakorló próbák, utána pontosan measuredTrials mért (teszt) próba. Az
+// érvénytelen próbák nem pótlódnak: a mérés így mindig ugyanannyi ingerből áll, az érvénytelenek csak
+// az okukkal együtt rögzülnek.
 internal sealed class TrialSchedule
 {
-    private readonly ModeSettings _settings;
+    private readonly int _practiceTrials;
+    private readonly int _measuredTrials;
 
-    public TrialSchedule(ModeSettings settings)
+    public TrialSchedule(int practiceTrials, int measuredTrials)
     {
-        _settings = settings;
+        ArgumentOutOfRangeException.ThrowIfNegative(practiceTrials);
+        ArgumentOutOfRangeException.ThrowIfNegative(measuredTrials);
+        _practiceTrials = practiceTrials;
+        _measuredTrials = measuredTrials;
     }
 
     public int PracticeTrialsDone { get; private set; }
 
-    public int TestAttempts { get; private set; }
+    public int TestTrialsDone { get; private set; }
 
     public int ValidTestTrials { get; private set; }
 
-    public TrialPhase CurrentPhase => PracticeTrialsDone < _settings.PracticeTrials ? TrialPhase.Practice : TrialPhase.Test;
+    public TrialPhase CurrentPhase => PracticeTrialsDone < _practiceTrials ? TrialPhase.Practice : TrialPhase.Test;
 
-    public int NextTrialNumber => CurrentPhase == TrialPhase.Practice ? PracticeTrialsDone + 1 : TestAttempts + 1;
+    // A következő próba sorszáma a fázisán belül (1-től).
+    public int NextTrialNumber => CurrentPhase == TrialPhase.Practice ? PracticeTrialsDone + 1 : TestTrialsDone + 1;
 
-    public bool IsCompleted => PracticeTrialsDone >= _settings.PracticeTrials && IsTestTargetReached;
+    public bool HasNextTrial => PracticeTrialsDone < _practiceTrials || TestTrialsDone < _measuredTrials;
 
-    public bool HasNextTrial
-    {
-        get
-        {
-            if (CurrentPhase == TrialPhase.Practice)
-            {
-                return true;
-            }
-
-            if (IsTestTargetReached)
-            {
-                return false;
-            }
-
-            var attemptLimit = _settings.RepeatInvalidTrials ? _settings.MaxTestAttempts : _settings.TestTrials;
-            return TestAttempts < attemptLimit;
-        }
-    }
-
-    private bool IsTestTargetReached => _settings.RepeatInvalidTrials
-        ? ValidTestTrials >= _settings.TestTrials
-        : TestAttempts >= _settings.TestTrials;
+    // Minden tervezett próba lefutott (érvényességtől függetlenül).
+    public bool IsCompleted => !HasNextTrial;
 
     public void Record(TrialPhase phase, bool valid)
     {
@@ -61,22 +46,23 @@ internal sealed class TrialSchedule
             return;
         }
 
-        TestAttempts++;
+        TestTrialsDone++;
         if (valid)
         {
             ValidTestTrials++;
         }
     }
 
+    // A naplóba: "Gyakorlás 2/3", illetve "Mérés 5/10" (a már lefutott próbák száma).
     public string ProgressText => CurrentPhase == TrialPhase.Practice
-        ? $"Gyakorlás {PracticeTrialsDone}/{_settings.PracticeTrials}"
-        : $"Érvényes {ValidTestTrials}/{_settings.TestTrials}";
+        ? $"Gyakorlás {PracticeTrialsDone}/{_practiceTrials}"
+        : $"Mérés {TestTrialsDone}/{_measuredTrials}";
 }
 
 internal static class ForeperiodSampler
 {
     // Az inger előtti várakozási idő (előperiódus) mintavétele a beállított eloszlásból.
-    internal static int Sample(Random random, ModeSettings settings)
+    internal static int Sample(Random random, TrialSettings settings)
     {
         var min = settings.ForeperiodMinMs;
         var max = settings.ForeperiodMaxMs;
@@ -86,16 +72,25 @@ internal static class ForeperiodSampler
         }
 
         var u = random.NextDouble();
-        if (settings.ForeperiodDistribution == ForeperiodDistribution.Uniform)
+        switch (settings.ForeperiodDistribution)
         {
-            return (int)Math.Round(min + (u * (max - min)));
-        }
+            case ForeperiodDistribution.Uniform:
+                return (int)Math.Round(min + (u * (max - min)));
 
-        // Csonkolt exponenciális eloszlás inverz eloszlásfüggvénnyel (nincs újramintavételezés):
-        // F(x) = (1 - e^(-(x-min)/mu)) / (1 - e^(-(max-min)/mu)).
-        var mu = (double)settings.ForeperiodExponentialMeanMs;
-        var truncation = 1 - Math.Exp(-(max - min) / mu);
-        var value = min - (mu * Math.Log(1 - (u * truncation)));
-        return (int)Math.Round(Math.Clamp(value, min, max));
+            case ForeperiodDistribution.Exponential:
+                // Csonkolt exponenciális eloszlás inverz eloszlásfüggvénnyel (nincs újramintavételezés):
+                // F(x) = (1 - e^(-(x-min)/mu)) / (1 - e^(-(max-min)/mu)).
+                var mu = (double)settings.ForeperiodExponentialMeanMs;
+                var truncation = 1 - Math.Exp(-(max - min) / mu);
+                var value = min - (mu * Math.Log(1 - (u * truncation)));
+                return (int)Math.Round(Math.Clamp(value, min, max));
+
+            default:
+                // Az ExperimentSettings.Validate() után nem fordulhat elő.
+                throw new ArgumentOutOfRangeException(
+                    nameof(settings),
+                    settings.ForeperiodDistribution,
+                    "Ismeretlen előperiódus-eloszlás.");
+        }
     }
 }

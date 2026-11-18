@@ -6,17 +6,27 @@ using ReactionTimeMeasurementApp.Measurement;
 namespace ReactionTimeMeasurementApp.Infrastructure.Display;
 
 // A kijelző pontos képidőzítése a Windows QueryDisplayConfig API-jával; ha az nem elérhető, az
-// EnumDisplaySettings egész Hz-es frekvenciájával (ezt a DisplayTiming.IsExact jelzi).
+// EnumDisplaySettings egész Hz-es frekvenciájával (ezt a DisplayTiming.IsExact jelzi). A fizikai
+// méretet a monitor EDID-adataiból olvassa (EdidReader).
 internal sealed class DisplayTimingReader : IDisplayTimingProvider
 {
     private const uint QdcOnlyActivePaths = 0x2;
     private const uint ModeInfoTypeSource = 1;
     private const uint ModeInfoTypeTarget = 2;
     private const uint DeviceInfoGetSourceName = 1;
+    private const uint DeviceInfoGetTargetName = 2;
     private const uint RotationIdentity = 1;
+    private const uint RotationRotate90 = 2;
+    private const uint RotationRotate270 = 4;
     private const uint ScanLineOrderingProgressive = 1;
     private const int ErrorSuccess = 0;
+    private const int ErrorInsufficientBuffer = 122;
+    private const int QueryAttempts = 3;
     private const int EnumCurrentSettings = -1;
+
+    // Az azonos tartalmú figyelmeztetések csak egyszer kerülnek a naplóba (a méretet a beállítások
+    // előnézete akár többször is lekérdezheti).
+    private readonly HashSet<string> _loggedMessages = new(StringComparer.Ordinal);
 
     public DisplayTiming Read(string screenDeviceName, Rectangle screenBounds)
     {
@@ -36,72 +46,169 @@ internal sealed class DisplayTimingReader : IDisplayTimingProvider
         return ReadFromEnumDisplaySettings(screenDeviceName, screenBounds);
     }
 
+    public PhysicalDisplaySize? ReadPhysicalSize(string screenDeviceName)
+    {
+        try
+        {
+            if (!TryFindActivePath(screenDeviceName, out var path, out _))
+            {
+                LogOnce($"A(z) {screenDeviceName} kijelző nem található a QueryDisplayConfig útvonalai között, a fizikai mérete nem olvasható ki.");
+                return null;
+            }
+
+            var monitorDevicePath = GetTargetMonitorDevicePath(path.TargetInfo);
+            var edid = monitorDevicePath is null ? null : EdidReader.ReadEdid(monitorDevicePath);
+            if (edid is null)
+            {
+                LogOnce($"A(z) {screenDeviceName} kijelző EDID-adata nem olvasható ki (monitor: {monitorDevicePath ?? "ismeretlen"}).");
+                return null;
+            }
+
+            var size = EdidReader.ParsePhysicalSize(edid, out var problem);
+            if (size is null)
+            {
+                LogOnce($"A(z) {screenDeviceName} kijelző EDID-adatából nem határozható meg a fizikai méret: {problem}");
+                return null;
+            }
+
+            // Az EDID a panel natív (általában fekvő) tájolására vonatkozik; elforgatott asztalnál a
+            // szélesség és a magasság felcserélődik.
+            var rotation = path.TargetInfo.Rotation;
+            if (rotation == RotationRotate90 || rotation == RotationRotate270)
+            {
+                size = new PhysicalDisplaySize(size.HeightMm, size.WidthMm);
+            }
+
+            LogOnce($"A(z) {screenDeviceName} kijelző fizikai mérete az EDID alapján: {size.WidthMm:0} x {size.HeightMm:0} mm.", warning: false);
+            return size;
+        }
+        catch (Exception ex)
+        {
+            LogOnce($"A(z) {screenDeviceName} kijelző fizikai mérete nem olvasható ki: {ex.Message}");
+            return null;
+        }
+    }
+
+    private void LogOnce(string message, bool warning = true)
+    {
+        lock (_loggedMessages)
+        {
+            if (!_loggedMessages.Add(message))
+            {
+                return;
+            }
+        }
+
+        if (warning)
+        {
+            Logger.Warning(message);
+        }
+        else
+        {
+            Logger.Info(message);
+        }
+    }
+
     private static DisplayTiming? TryReadFromDisplayConfig(string screenDeviceName, Rectangle screenBounds)
     {
-        if (GetDisplayConfigBufferSizes(QdcOnlyActivePaths, out var pathCount, out var modeCount) != ErrorSuccess)
+        if (!TryFindActivePath(screenDeviceName, out var path, out var modes))
         {
             return null;
         }
 
-        var paths = new DisplayConfigPathInfo[pathCount];
-        var modes = new DisplayConfigModeInfo[modeCount];
-        if (QueryDisplayConfig(QdcOnlyActivePaths, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != ErrorSuccess)
+        if (path.TargetInfo.ModeInfoIdx >= modes.Length || modes[path.TargetInfo.ModeInfoIdx].InfoType != ModeInfoTypeTarget)
         {
             return null;
         }
 
-        for (var i = 0; i < pathCount; i++)
+        var signal = modes[path.TargetInfo.ModeInfoIdx].TargetMode.TargetVideoSignalInfo;
+        var refreshRate = ToDouble(signal.VSyncFreq);
+        if (!(refreshRate > 1))
         {
-            var path = paths[i];
-            if (!string.Equals(GetSourceGdiName(path.SourceInfo), screenDeviceName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (path.TargetInfo.ModeInfoIdx >= modeCount || modes[path.TargetInfo.ModeInfoIdx].InfoType != ModeInfoTypeTarget)
-            {
-                return null;
-            }
-
-            var signal = modes[path.TargetInfo.ModeInfoIdx].TargetMode.TargetVideoSignalInfo;
-            var refreshRate = ToDouble(signal.VSyncFreq);
-            if (!(refreshRate > 1))
-            {
-                refreshRate = ToDouble(path.TargetInfo.RefreshRate);
-            }
-
-            var desktopHeight = screenBounds.Height;
-            if (path.SourceInfo.ModeInfoIdx < modeCount && modes[path.SourceInfo.ModeInfoIdx].InfoType == ModeInfoTypeSource)
-            {
-                desktopHeight = (int)modes[path.SourceInfo.ModeInfoIdx].SourceMode.Height;
-            }
-
-            if (!(refreshRate > 1) || signal.ActiveSize.Cy == 0 || signal.TotalSize.Cy < signal.ActiveSize.Cy || desktopHeight <= 0)
-            {
-                return null;
-            }
-
-            string? warning = null;
-            if (path.TargetInfo.Rotation != RotationIdentity)
-            {
-                warning = "A kijelző el van forgatva: a scanout-korrekció a fentről lefelé haladó sorkirajzolást feltételezi, így nem érvényes.";
-            }
-            else if (signal.ScanLineOrdering != ScanLineOrderingProgressive)
-            {
-                warning = "A kijelző nem progresszív (váltottsoros) képjelet kap: a scanout-korrekció nem érvényes.";
-            }
-
-            return new DisplayTiming(
-                refreshRate,
-                (int)signal.ActiveSize.Cy,
-                (int)signal.TotalSize.Cy,
-                desktopHeight,
-                IsExact: warning is null,
-                Source: "QueryDisplayConfig",
-                warning);
+            refreshRate = ToDouble(path.TargetInfo.RefreshRate);
         }
 
-        return null;
+        var desktopHeight = screenBounds.Height;
+        if (path.SourceInfo.ModeInfoIdx < modes.Length && modes[path.SourceInfo.ModeInfoIdx].InfoType == ModeInfoTypeSource)
+        {
+            desktopHeight = (int)modes[path.SourceInfo.ModeInfoIdx].SourceMode.Height;
+        }
+
+        if (!(refreshRate > 1) || signal.ActiveSize.Cy == 0 || signal.TotalSize.Cy < signal.ActiveSize.Cy || desktopHeight <= 0)
+        {
+            return null;
+        }
+
+        string? warning = null;
+        if (path.TargetInfo.Rotation != RotationIdentity)
+        {
+            warning = "A kijelző el van forgatva: a scanout-korrekció a fentről lefelé haladó sorkirajzolást feltételezi, így nem érvényes.";
+        }
+        else if (signal.ScanLineOrdering != ScanLineOrderingProgressive)
+        {
+            warning = "A kijelző nem progresszív (váltottsoros) képjelet kap: a scanout-korrekció nem érvényes.";
+        }
+
+        return new DisplayTiming(
+            refreshRate,
+            (int)signal.ActiveSize.Cy,
+            (int)signal.TotalSize.Cy,
+            desktopHeight,
+            IsExact: warning is null,
+            Source: "QueryDisplayConfig",
+            warning);
+    }
+
+    // Az aktív megjelenítési útvonalak közül az, amelynek forrása a megadott GDI-eszköz (pl. "\\.\DISPLAY1").
+    private static bool TryFindActivePath(string screenDeviceName, out DisplayConfigPathInfo path, out DisplayConfigModeInfo[] modes)
+    {
+        if (TryQueryActivePaths(out var paths, out modes))
+        {
+            foreach (var candidate in paths)
+            {
+                if (string.Equals(GetSourceGdiName(candidate.SourceInfo), screenDeviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    path = candidate;
+                    return true;
+                }
+            }
+        }
+
+        path = default;
+        return false;
+    }
+
+    // A méretlekérdezés és a QueryDisplayConfig között megváltozhat a kijelzőtopológia (pl. épp
+    // csatlakoztatott monitor); ilyenkor ERROR_INSUFFICIENT_BUFFER jön, és a párost újra kell kezdeni.
+    private static bool TryQueryActivePaths(out DisplayConfigPathInfo[] paths, out DisplayConfigModeInfo[] modes)
+    {
+        for (var attempt = 0; attempt < QueryAttempts; attempt++)
+        {
+            if (GetDisplayConfigBufferSizes(QdcOnlyActivePaths, out var pathCount, out var modeCount) != ErrorSuccess)
+            {
+                break;
+            }
+
+            paths = new DisplayConfigPathInfo[pathCount];
+            modes = new DisplayConfigModeInfo[modeCount];
+            var result = QueryDisplayConfig(QdcOnlyActivePaths, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+            if (result == ErrorSuccess)
+            {
+                // A hívás a ténylegesen kitöltött elemszámot adja vissza, ez kevesebb is lehet.
+                Array.Resize(ref paths, (int)pathCount);
+                Array.Resize(ref modes, (int)modeCount);
+                return true;
+            }
+
+            if (result != ErrorInsufficientBuffer)
+            {
+                break;
+            }
+        }
+
+        paths = [];
+        modes = [];
+        return false;
     }
 
     private static DisplayTiming ReadFromEnumDisplaySettings(string screenDeviceName, Rectangle screenBounds)
@@ -126,16 +233,28 @@ internal sealed class DisplayTimingReader : IDisplayTimingProvider
     {
         var request = new DisplayConfigSourceDeviceName
         {
-            Header = new DisplayConfigDeviceInfoHeader
-            {
-                Type = DeviceInfoGetSourceName,
-                Size = (uint)Marshal.SizeOf<DisplayConfigSourceDeviceName>(),
-                AdapterId = source.AdapterId,
-                Id = source.Id
-            }
+            Header = CreateHeader(DeviceInfoGetSourceName, Marshal.SizeOf<DisplayConfigSourceDeviceName>(), source.AdapterId, source.Id)
         };
 
         return DisplayConfigGetDeviceInfo(ref request) == ErrorSuccess ? request.ViewGdiDeviceName : null;
+    }
+
+    // A monitor eszközútvonala, pl. "\\?\DISPLAY#DEL40F7#5&2a7b3c5e&0&UID4353#{e6f07b5f-...}".
+    private static string? GetTargetMonitorDevicePath(DisplayConfigPathTargetInfo target)
+    {
+        var request = new DisplayConfigTargetDeviceName
+        {
+            Header = CreateHeader(DeviceInfoGetTargetName, Marshal.SizeOf<DisplayConfigTargetDeviceName>(), target.AdapterId, target.Id)
+        };
+
+        return DisplayConfigGetDeviceInfo(ref request) == ErrorSuccess && !string.IsNullOrEmpty(request.MonitorDevicePath)
+            ? request.MonitorDevicePath
+            : null;
+    }
+
+    private static DisplayConfigDeviceInfoHeader CreateHeader(uint type, int size, Luid adapterId, uint id)
+    {
+        return new DisplayConfigDeviceInfoHeader { Type = type, Size = (uint)size, AdapterId = adapterId, Id = id };
     }
 
     private static double ToDouble(DisplayConfigRational rational)
@@ -157,6 +276,9 @@ internal sealed class DisplayTimingReader : IDisplayTimingProvider
 
     [DllImport("user32.dll")]
     private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigSourceDeviceName requestPacket);
+
+    [DllImport("user32.dll")]
+    private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigTargetDeviceName requestPacket);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -279,6 +401,23 @@ internal sealed class DisplayTimingReader : IDisplayTimingProvider
 
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string ViewGdiDeviceName;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DisplayConfigTargetDeviceName
+    {
+        public DisplayConfigDeviceInfoHeader Header;
+        public uint Flags;
+        public uint OutputTechnology;
+        public ushort EdidManufactureId;
+        public ushort EdidProductCodeId;
+        public uint ConnectorInstance;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+        public string MonitorFriendlyDeviceName;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string MonitorDevicePath;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

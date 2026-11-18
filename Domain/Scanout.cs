@@ -178,13 +178,3 @@ public static class ScanoutProtocol
         return true;
     }
 }
-
-// A mérés előkészítése során felmerülő, a felhasználónak szóló (nem programhiba jellegű) probléma,
-// pl. nincs beállítva a Tobii display area, vagy a beállított excentricitás nem fér el a képernyőn.
-public sealed class MeasurementSetupException : Exception
-{
-    public MeasurementSetupException(string message)
-        : base(message)
-    {
-    }
-}

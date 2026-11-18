@@ -1,6 +1,6 @@
 ﻿namespace ReactionTimeMeasurementApp.UI;
 
-partial class MainMenu
+partial class MainForm
 {
     private System.ComponentModel.IContainer components = null;
     private BufferedPanel contentHostPanel;
@@ -30,13 +30,13 @@ partial class MainMenu
         contentHostPanel.Size = new Size(1400, 900);
         contentHostPanel.TabIndex = 0;
         // 
-        // MainMenu
+        // MainForm
         // 
         AutoScaleDimensions = new SizeF(7F, 15F);
         AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(1400, 900);
         Controls.Add(contentHostPanel);
-        Name = "MainMenu";
+        Name = "MainForm";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "Reakcióidő-mérés Tobii eszközzel";
         ResumeLayout(false);
