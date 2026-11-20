@@ -20,9 +20,6 @@ Más mappa a `REACTIONTIME_DATA_DIR` környezeti változóval adható meg.
 | `measurements\gaze\<kezdés>_<mérés neve>_gaze.csv` | a mérés összes tekintetmintája |
 | `logs\log-<dátum>.txt` | napló |
 
-A legelső programváltozat az exe mellé mentett (`measurements` mappa). A
-statisztika ezeket a fájlokat is beolvassa.
-
 ## Elnevezések: mért és gyakorló ingerek
 
 A felület magyar szavai és a fájlok angol azonosítói így felelnek meg egymásnak:
@@ -33,9 +30,7 @@ A felület magyar szavai és a fájlok angol azonosítói így felelnek meg egym
 | **gyakorló (teszt) inger** („Gyakorló (teszt) ingerek száma”) | `Trials.PracticeTrials` | `PracticeTrials` | `Practice` | „Gy” előtag, „Gyakorló” felirat; nem számít bele az összesítésbe |
 
 Figyelem: a „teszt” szó a felületen a **gyakorló** ingereket jelenti, a
-fájlokban viszont a `Phase=Test` a **mért** próba. A régi fájlok `TestTrials`
-mezője is a mért próbákra vonatkozott (lásd
-[formátumverziók](#formátumverziók)).
+fájlokban viszont a `Phase=Test` a **mért** próba.
 
 Egy mérés mindig pontosan `PracticeTrials + MeasuredTrials` ingerből áll:
 először a gyakorlók, utána a mértek. Az érvénytelen próbák **nem pótlódnak**,
@@ -486,7 +481,6 @@ A fájl végén:
 |---|---|
 | `Completed` | minden tervezett próba lefutott |
 | `Aborted` | megszakítás: Esc, az alkalmazás bezárása, mentési vagy váratlan hiba (az ESP mérés közbeni kiesése nem szakítja meg a mérést) |
-| `AttemptLimitReached` | csak 2-es formátumú fájlokban: az érvénytelen próbák pótlása közben elfogyott a `MaxTestAttempts` |
 | (nincs sor) | a program a mérés közben leállt |
 
 ### Próbaoszlopok
@@ -529,19 +523,8 @@ képpontban; érvénytelen mintánál üres) és `EyeDistanceMm`.
 
 ### Formátumverziók
 
-A statisztika minden változatot beolvassa; az oszlopokat név szerint keresi, így
-a régi neveket is felismeri. A tervezett, illetve célzott próbaszám oszlopa és a
-próbaszám-metaadat jelentése azonban verziónként más:
-
-| `FormatVersion` | Program | Próbaszám-oszlop | Próbaszám-metaadat | Távolság-oszlop | `Completed` jelentése |
-|---|---|---|---|---|---|
-| 1 (nincs ilyen sor) | a legelső változat | `TotalTrials`: a mérés összes próbája (rögzített szám, gyakorlás nélkül) | – | – | csak befejezett mérés mentődött; a lezáró sor hiánya is befejezettet jelent |
-| 2 | 1.x (1.1.0) | `TargetValidTrials`: a kívánt **érvényes** tesztpróbák száma; az érvénytelenek helyett újabb próba jött (`RepeatInvalidTrials`), legfeljebb `MaxTestAttempts`-ig | `TestTrials`: ugyanez a cél; mellette `RepeatInvalidTrials`, `MaxTestAttempts` és a látószög alapú kulcsok (`StimulusDiameterDeg`, `MinEccentricityDeg`, `MaxEccentricityDeg`, `EffectiveMaxEccentricityDeg`, `GazeValidityRadiusDeg`, `PixelsPerMm`, `ViewingDistanceMm`, `ViewingDistanceSource`) | `StimulusEccentricityDeg`: fokban | összegyűlt a kívánt számú érvényes próba |
-| 3 | 2.0.0 | `PlannedTestTrials`: a pontosan lefutó mért próbák száma, pótlás nélkül | `MeasuredTrials`: ugyanez; nincs `TestTrials`, `RepeatInvalidTrials`, `MaxTestAttempts` | `StimulusEccentricityPx`: képpontban | minden tervezett próba lefutott |
-
-Ebből következik, hogy egy 2-es fájlban a `TestTrials=10` 10 érvényes próbát
-jelentett célként (az érvénytelenekkel együtt legfeljebb `MaxTestAttempts`
-próba futott le), egy 3-as fájlban a `MeasuredTrials=10` pontosan 10 lefutó
-mért próbát. A 2-es fájlok fokban megadott távolsága a
-kijelző és a nézési távolság nélkül nem váltható át képpontra, ezért a program
-nem is próbálja.
+A statisztika csak a 3-as formátumú (`FormatVersion=3`, 2.0.0) fájlokat
+olvassa be. A régebbi, 1.x programmal készült fájlokat (nincs `FormatVersion`
+sor, vagy az értéke `1` vagy `2`) beolvashatatlanként jelzi; ezek oszlopai más
+jelentésűek (pl. a látószögben megadott távolság), ezért a program nem is
+próbálja értelmezni őket.

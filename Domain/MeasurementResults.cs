@@ -22,14 +22,8 @@ public enum TrialInvalidReason
 
 public enum SessionStatus
 {
-    // Minden tervezett próba lefutott (a 2-es és régebbi formátumú fájlokban: összegyűlt a kívánt
-    // számú érvényes tesztpróba).
+    // Minden tervezett próba lefutott.
     Completed,
-
-    // Csak a 2-es és régebbi formátumú fájlokban fordul elő: az érvénytelen próbák pótlása közben
-    // elfogyott a megengedett próbálkozás. A mérés az érvénytelen próbákat nem pótolja, ezért ilyen
-    // állapotot nem ad.
-    AttemptLimitReached,
 
     // A mérést megszakították (Esc, visszalépés, mentési hiba). Az ESP kiesése nem szakítja meg: a
     // mérés nélküle, ESP-reakcióidő nélkül fejeződik be.
@@ -54,9 +48,7 @@ public sealed class MeasurementResult
     // A próba sorszáma a fázisán (gyakorló / teszt) belül.
     public required int TrialNumber { get; init; }
 
-    // A mérés tervezett mért (teszt) próbáinak száma (Trials.MeasuredTrials). A 2-es és régebbi
-    // formátumú fájlokban ez az oszlop a kívánt ÉRVÉNYES tesztpróbák számát jelentette (az érvénytelenek
-    // helyett akkor újabb próba jött), az 1-esben az összes próba számát.
+    // A mérés tervezett mért (teszt) próbáinak száma (Trials.MeasuredTrials).
     public required int PlannedTestTrials { get; init; }
 
     // Az ESP által (fotodióda + válaszgomb) mért reakcióidő; null időtúllépésnél, vagy ha az ESP nem

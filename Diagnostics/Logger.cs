@@ -10,13 +10,8 @@ internal enum LogLevel
     Error
 }
 
-// Egyszerű, fájlba is író napló. A Debug.WriteLine Release buildben semmit nem ír ki, ezért minden
-// üzenet egy "logs" mappába is kerül (a mérési adatok mellé): így egy résztvevőnél történt hibás
-// mérés utólag is visszakövethető.
-//
 // A naplózás minden rétegen átívelő feladat, ezért ez az egyetlen szándékosan statikus szolgáltatás:
-// a helyét a composition root (Program) adja meg induláskor, az Initialize hívásával. Előtte csak a
-// Debug kimenetre ír.
+// a helyét a composition root (Program) adja meg induláskor, az Initialize hívásával. 
 //
 // A hívó szálat a fájlírás nem lassítja (a napló a soros olvasóciklusból és a UI-szál kattintáskezelőjéből
 // is hívódik): a sorok egy sorba (Channel) kerülnek, és egyetlen háttérszál írja ki őket kötegekben. Hiba

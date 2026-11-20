@@ -461,8 +461,7 @@ tekintetadat.
 
 A munkamenet állapota `Completed` (minden tervezett próba lefutott) vagy
 `Aborted` lehet. Ha a fájlban nincs lezáró sor, az `Interrupted` állapotot
-jelent. Az `AttemptLimitReached` csak a 2-es formátumú (1.x programmal
-készült) fájlokban fordul elő.
+jelent.
 
 ## 5. Szálkezelés
 
@@ -665,12 +664,10 @@ a mérési és a tekintetfájlt `FileMode.CreateNew`-val, szabad néven hozza l�
 újrapróbálkozik. A `Close` a lezáró sor hibája esetén is felszabadítja a
 fájlokat. A `MeasurementRepository` a fájlokat oszlopnév
 szerint olvassa (írásra is megosztva, így a folyamatban lévő mérés fájlja is
-olvasható); a `MeasurementResult.PlannedTestTrials` értékét a régi
-fájlokban a `TargetValidTrials` vagy a `TotalTrials` oszlopból tölti (eltérő
-jelentéssel), a `StimulusEccentricityPx`-et csak a saját oszlopából (a fokban
-mért régi érték képpontra nem váltható át). Az `ActualForeperiodMs` és a
-`PrematureClicks` oszlop a korábbi 3-as fájlokból hiányozhat; ilyenkor az
-érték null. A `LoadAll` nem dob kivételt a fájlok hibája miatt
+olvasható). Csak a 3-as formátumú fájlt olvassa: a más `FormatVersion`-ű
+vagy anélküli (1.x) fájl beolvashatatlan. Az `ActualForeperiodMs`, a
+`PrematureClicks` és a `ClickX`, `ClickY` oszlop a korábbi 3-as fájlokból
+hiányozhat; ilyenkor az érték null. A `LoadAll` nem dob kivételt a fájlok hibája miatt
 (`MeasurementLoadResult(Sessions, UnreadableFiles)`): a hibás vagy csonka
 próbasor kimarad (`MeasurementSessionResult.SkippedRowCount`, figyelmeztetés a
 naplóban fájllal és sorszámmal), az értelmezhetetlen fejlécű fájl teljes

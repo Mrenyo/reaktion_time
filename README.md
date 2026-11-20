@@ -237,8 +237,8 @@ A jelenlegi verzió a **2.0.0** (`ReactionTimeMeasurementApp.csproj`,
 - **A mérési fájlok 3-as formátumúak** (`FormatVersion=3`): a
   `PlannedTestTrials` oszlop a pontosan lefutó mért próbák száma, a
   `StimulusEccentricityPx` képpontban adja az inger távolságát. A régebbi
-  fájlokat a statisztika továbbra is beolvassa; az oszlopok verziónkénti
-  jelentése: [docs/MERESI_BEALLITASOK.md](docs/MERESI_BEALLITASOK.md#formátumverziók).
+  (1.x) mérési fájlokat a statisztika nem olvassa be:
+  [docs/MERESI_BEALLITASOK.md](docs/MERESI_BEALLITASOK.md#formátumverziók).
 
 A változások listája: [CHANGELOG.md](CHANGELOG.md).
 

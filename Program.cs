@@ -9,8 +9,8 @@ using ReactionTimeMeasurementApp.UI;
 
 namespace ReactionTimeMeasurementApp;
 
-// A felület által használt szolgáltatások. Mindegyik interfész; a megvalósításokat a composition
-// root (Program.Main) választja ki és köti össze.
+// A felület által használt szolgáltatások. Mindegyik interfész. 
+// A megvalósításokat a composition root (Program.Main) választja ki és köti össze.
 internal sealed record AppDependencies(
     bool DeveloperMode,
     IGazeTracker GazeTracker,
@@ -22,8 +22,8 @@ internal sealed record AppDependencies(
 
 static class Program
 {
-    // Composition root: itt jön létre és kapcsolódik össze minden szolgáltatás (konstruktoros
-    // függőséginjektálás, konténer nélkül). Máshol a kód csak interfészeket lát.
+    // Composition root: itt jön létre és kapcsolódik össze minden szolgáltatás 
+    // (konstruktoros függőséginjektálás, konténer nélkül). Máshol a kód csak interfészeket lát.
     [STAThread]
     static void Main(string[] args)
     {
@@ -41,8 +41,8 @@ static class Program
             ErrorPopup.ShowGeneral(null, eventArgs.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             ErrorPopup.ShowGeneral(null, eventArgs.ExceptionObject as Exception);
-        // A meg nem figyelt Task-kivétel a szemétgyűjtő szálán, tetszőleges pillanatban érkezik (akár egy
-        // próba közben, a résztvevő előtt), ezért felugró ablak helyett csak a naplóba kerül.
+        // A meg nem figyelt Task-kivétel a szemétgyűjtő szálán, tetszőleges pillanatban érkezik 
+        // (akár egy próba közben, a résztvevő előtt), ezért felugró ablak helyett csak a naplóba kerül.
         TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
         {
             Logger.Error("Meg nem figyelt Task-kivétel.", eventArgs.Exception);

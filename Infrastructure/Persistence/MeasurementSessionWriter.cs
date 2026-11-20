@@ -15,8 +15,8 @@ namespace ReactionTimeMeasurementApp.Infrastructure.Persistence;
 //   measurements\<kezdés>_<mód>.csv            - metaadatok ("# Kulcs=Érték" sorok) + próbánként egy sor
 //   measurements\gaze\<kezdés>_<mód>_gaze.csv  - tekintetmintánként egy sor
 //
-// A formátum verzióját a "# FormatVersion=" sor adja (az oszlopok jelentése verziónként: lásd
-// MeasurementRepository). A PlannedTestTrials a tervezett mért próbák száma, a StimulusEccentricityPx
+// A formátum verzióját a "# FormatVersion=" sor adja; a MeasurementRepository csak ezt a verziót
+// olvassa. A PlannedTestTrials a tervezett mért próbák száma, a StimulusEccentricityPx
 // az inger középpontjának távolsága a fixációs ponttól, képpontban. A metaadat-érték a sor végéig tart,
 // idézőjelezés nélkül (a sor nem CSV-mező, így vessző is lehet benne); a sortörés szóközzé válik.
 //

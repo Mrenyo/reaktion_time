@@ -227,7 +227,6 @@ internal static class ResultDisplayText
     internal static string ToDisplayText(this SessionStatus status) => status switch
     {
         SessionStatus.Completed => "befejezett",
-        SessionStatus.AttemptLimitReached => "próbálkozási korlát",
         SessionStatus.Aborted => "megszakítva",
         _ => "nem zárult le"
     };

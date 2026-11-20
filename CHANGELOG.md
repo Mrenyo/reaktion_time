@@ -107,7 +107,11 @@ A beállításfájl 2-es (`SettingsVersion: 2`), a mérési fájl 3-as
   (`StimulusDiameterDeg`, `MinEccentricityDeg`, `MaxEccentricityDeg`,
   `GazeValidityRadiusDeg`, `DefaultViewingDistanceCm`).
 - Az érvénytelen próbák ismétlése (`RepeatInvalidTrials`, `MaxTestAttempts`) és
-  az `AttemptLimitReached` állapot (a régi fájlokban továbbra is olvasható).
+  az `AttemptLimitReached` állapot.
+- A régi (1-es és 2-es formátumú, 1.x programmal készült) mérési fájlok
+  beolvasása: a statisztika csak a 3-as formátumot olvassa, a régebbi fájlokat
+  beolvashatatlanként jelzi. Az exe melletti `measurements` mappát sem olvassa
+  már.
 
 ## [1.x]
 
