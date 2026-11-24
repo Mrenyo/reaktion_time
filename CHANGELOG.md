@@ -13,6 +13,9 @@ A beállításfájl 2-es (`SettingsVersion: 2`), a mérési fájl 3-as
 
 ### Hozzáadva
 
+- **Scanout-validáció** (`scanout_validacio/`): önálló eszköz a scanout-korrekció
+  ellenőrzésére két fotodiódával, saját firmware-rel és PC-programmal. A
+  mérőprogram fordításából ki van zárva.
 - **Testreszabás** ablak: minden mérési beállítás a programban állítható,
   előnézettel és valós méretű ingerrel; a hibákat és a figyelmeztetéseket az
   ablak fülenként jelzi.

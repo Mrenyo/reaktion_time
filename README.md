@@ -128,6 +128,15 @@ A szoftver oldaláról a hardvernek ennyit kell teljesítenie:
    vetíti a tekintetet a képernyőre. Tekintet-ellenőrzés nélkül a szemkövető
    elhagyható.
 
+### Scanout-validáció
+
+A [`scanout_validacio/`](scanout_validacio) mappa önálló eszköz a scanout-korrekció
+ellenőrzésére két fotodiódával: saját ESP-IDF firmware (a második fotodióda a
+GPIO6-on) és saját .NET-program, amely a táblázatot és az ábrát is elkészíti. A
+mérőprogramnak nem része: a `ReactionTimeMeasurementApp.csproj` a fordításból
+kizárja, a solution nem tartalmazza. A validációs firmware után a mérőprogram
+firmware-ét vissza kell tölteni. Leírás: [scanout_validacio/README.md](scanout_validacio/README.md).
+
 ## Fordítás és futtatás
 
 ```bash
