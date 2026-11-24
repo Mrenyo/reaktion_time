@@ -122,6 +122,18 @@ cd pc; dotnet run -c Release -- --elemzes "meresek\scanout_validacio_20261120_14
 - Regresszió a mért Δt-re a várt függvényében, minden érvényes próbára: a meredekség 1-től való
   eltérése a soridő (a modell) hibája, a tengelymetszet az érzékelőláncok állandó eltolása.
 
+## Mérések a repóban
+
+A [`meresek/`](meresek) mappában a szakdolgozathoz használt három teljes mérés van (MP59G,
+1920 × 1080, 74,97 Hz, 5 pont × 50 próba). A program új méréseit a `pc/meresek` mappába írja,
+azt a git kihagyja.
+
+| Mappa | Dátum |
+|---|---|
+| `scanout_validacio_20261121_172833` | 2026-11-21 17:28 |
+| `scanout_validacio_20261124_140134` | 2026-11-24 14:01 |
+| `scanout_validacio_20261124_155449` | 2026-11-24 15:54 |
+
 ## Soros protokoll (UART0, 115200, soronként)
 
 | Parancs | Válasz |
