@@ -20,7 +20,7 @@ További tanulság, hogy az ellenőrző adat megtartása a mérőrendszer hibái
 - **A méretek képpontban vannak megadva:** a látószög a monitortól és az ülési távolságtól függ, ezért összehasonlítható mérésekhez azonos mérőhely kell.
 - **A kalibráció pontosságát a program nem méri:** a tekintet-ellenőrzés megbízhatósága a gyártói kalibráció minőségétől függ.
 - **A válasz egyetlen gomb:** a rendszer egyszerű reakcióidőt mér, választásos feladat nem valósítható meg vele.
-- **A firmware 1.1.0-s változata még nem futott a mérőeszközön** (5.8. szakasz); a közölt mérések a korábbi változattal készültek.
+- **Az 1.1.0-s firmware-rel teljes mérés még nem készült** (5.8. szakasz); a parancsai és a ciklusideje a mérőeszközön ellenőrizve, a közölt reakcióidő-mérések a korábbi változattal készültek.
 
 ## Továbbfejlesztési lehetőségek
 

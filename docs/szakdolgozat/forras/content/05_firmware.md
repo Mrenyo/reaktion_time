@@ -4,14 +4,9 @@ Az időmérő egység programja az Espressif hivatalos keretrendszerében, az ES
 
 ## A keretrendszer választása: ESP-IDF
 
-A firmware korábbi változata a forráskód megjegyzései szerint Arduino-környezetben készült, a végleges ESP-IDF-re épül. Az áttérés okai:
+A firmware korábbi változata Arduino-környezetben készült. Az ESP-IDF-re való áttérés okai: a FreeRTOS többmagos változatában a feladatok maghoz rögzíthetők, így a mérés kizárólagosan használhatja az egyik magot [46]; az ütemező, a felügyeleti időzítő és a memória beállításai verziózható fájlban rögzíthetők; a perifériák a keretrendszer dokumentált meghajtóin át érhetők el [40] [45]; a CMake-alapú fordítás reprodukálható.
 
-- **Közvetlen hozzáférés a FreeRTOS-hoz.** Az ESP-IDF a FreeRTOS többmagos változatára épül [48]; a feladatok (taskok) maghoz rögzíthetők, így a mérés kizárólagosan használhatja az egyik magot.
-- **Teljes körű konfiguráció.** Az ütemező órajele, a felügyeleti időzítő, a memória és a flash beállításai verziózható fájlban rögzíthetők.
-- **A perifériák natív meghajtói.** Az A/D átalakító, a GPIO és az UART köztes réteg nélkül, a keretrendszer dokumentált meghajtóin át érhető el [40] [47].
-- **Reprodukálható fordítás.** A projekt CMake-alapú, a függőségei és a célhardver a forrásfában rögzítettek.
-
-A projekt ESP-IDF 5.5.6 verzióval készült, a neve `Reakcioido_firmware`. A gyökér `CMakeLists.txt` betölti az ESP-IDF fordítási rendszerét, a `main/CMakeLists.txt` a forrásfájlt és a felhasznált komponenseket (`esp_driver_gpio`, `esp_driver_uart`, `esp_timer`, `esp_adc`) adja meg, a teljes program a `main/main.c` fájlban van (kb. 220 sor), a projekt saját beállításait pedig a `sdkconfig.defaults` rögzíti. A fordítás és a feltöltés egyetlen paranccsal történik (`idf.py build flash`), a fejlesztőlap soros (UART) portján keresztül.
+A projekt ESP-IDF 5.5.6 verzióval készült (a repó `firmware/` mappája). A teljes program a `main/main.c` fájlban van (kb. 220 sor), a felhasznált komponensek `esp_driver_gpio`, `esp_driver_uart`, `esp_timer` és `esp_adc`, a projekt beállításait a `sdkconfig.defaults` rögzíti. Fordítás és feltöltés: `idf.py build flash`, a soros (UART) porton keresztül.
 
 ### A projekt beállításai
 
@@ -23,8 +18,6 @@ Beállítás | Indoklás
 `CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240` | 240 MHz-es processzor-órajel az alapértelmezett 160 MHz helyett: rövidebb mérő ciklus
 `CONFIG_FREERTOS_HZ=1000` | 1 ms-os ütemezési órajel az alapértelmezett 10 ms helyett
 `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1` kikapcsolva | a mérő feladat folyamatosan foglalja az 1-es magot; e beállítás nélkül a felügyeleti időzítő hibát jelezne, mert az üresjárati feladat ott nem jut futáshoz
-
-A konzol (a szabványos be- és kimenet) a keretrendszer alapértelmezése szerint az UART0-ra van irányítva 115200 baud sebességgel, és a fejlesztőlap USB–soros átalakítóján keresztül éri el a PC-t.
 
 ## A program felépítése
 
@@ -108,7 +101,7 @@ A megszakítás és a mérő feladat más-más processzormagon futhat, a 32 bite
 
 Az időbélyegek az `esp_timer` komponens órájából származnak, amely a bekapcsolás óta eltelt időt mikroszekundumban, 64 bites értékként adja meg [42]. A program 64 biten tárolja és vonja ki őket; a számláló a gyakorlatban nem csordul túl (a túlcsordulásig több százezer év telne el).
 
-A firmware korábbi (1.0-s) változata az időt 32 bitre csonkolva tárolta. A 32 bites számláló körülbelül 71,6 percenként körbefordul, a tartási idő vizsgálata pedig előjeles 32 bites különbséggel dolgozott: ha a gombot 35,8 percnél hosszabb ideig nem nyomták le, a különbség negatívba fordult, a gomb tévesen lenyomottnak látszott, és a következő tényleges lenyomás elveszhetett. Hosszabb szünet utáni első próbában ez hiányzó reakcióidőt okozhatott. Az 1.1.0-s változat 64 bites időbélyegei ezt a hibát megszüntetik.
+A korábbi (1.0-s) változat 32 bites időbélyegeivel 35,8 percnél hosszabb szünet után a gomb tévesen lenyomottnak látszhatott, és a következő lenyomás elveszhetett; a 64 bites időbélyegek ezt megszüntetik.
 
 Az óra pontosságát a mikrokontroller kvarcoszcillátora határozza meg. Egy tipikusan ±10–20 ppm pontosságú kvarc 300 ms-os reakcióidőn néhány nanoszekundumnyi hibát okoz, ami a többi hibaforráshoz képest elhanyagolható. [BIZONYITAS: A fejlesztőlap kvarcoszcillátorának adatlapi pontossága (ppm), vagy az ESP órájának összevetése ismert pontosságú referenciával (pl. jelgenerátor ismert periódusú jelének mérése).]
 
@@ -134,16 +127,12 @@ if (rt >= 0) printf("%.3f\n", rt);
 else         printf("NA\n");
 ```
 
-Ez megfelel a 3.4. szakasz képletének. `NA` a válasz, ha a korrekció megérkezése óta nem volt fényjel, a fényjel után nem volt gomblenyomás, vagy a korrigált érték negatív lenne. Az ESP kérés nélkül soha nem küld adatot, így minden beérkező sor egy függőben lévő kérés válasza. A válaszok alakja kérésenként más (`OK`; két pontot tartalmazó verziószám; szám vagy `NA`; `DIAG`, illetve `ADC` kezdetű sor), így egy késve érkező válasz nem téveszthető össze egy másik kérés válaszával.
-
-A két diagnosztikai parancsot a PC-s program nem küldi; soros terminálból kérhetők le. A `DIAG` a mérő ciklus tényleges periódusidejét, vagyis a fényjel időbélyegének felbontását adja meg; az `ADC` paranccsal a jelző sötét és világos állapotához tartozó jelszint olvasható ki, amiből a küszöb tartaléka megítélhető. A ciklusidő mérése a mérést érdemben nem lassítja: a ciklushoz egy kivonást és egy összehasonlítást ad.
-
-A soros átvitel ideje nem része az eredménynek. 115200 baud sebességnél egy bájt átvitele körülbelül 87 µs, egy tíz-tizenkét karakteres üzeneté körülbelül 1 ms; ehhez járul az USB–soros átalakító és a PC illesztőprogramjának pufferelése. Mindez csak azt befolyásolja, hogy a PC mikor kapja meg az eredményt.
+Ez megfelel a 3.4. szakasz képletének. `NA` a válasz, ha a korrekció megérkezése óta nem volt fényjel, a fényjel után nem volt gomblenyomás, vagy a korrigált érték negatív lenne. Az ESP kérés nélkül nem küld adatot, és a válaszok alakja kérésenként más, így egy késve érkező válasz nem téveszthető össze egy másik kérés válaszával. A két diagnosztikai parancsot a PC-s program nem küldi; soros terminálból kérhetők le. A soros átvitel ideje (egy rövid üzeneté kb. 1 ms) nem része az eredménynek.
 
 ## A firmware ismert korlátai
 
 - **Rögzített küszöb.** A 475-ös küszöb a fejlesztéshez használt kijelzőn és fényerőn megfigyelt szintekhez igazodik; más kijelzőn vagy jelentősen kisebb fényerőn a világos szint a küszöb közelébe kerülhet. Továbbfejlesztési lehetőség a küszöb automatikus beállítása a mérés elején mért sötét és világos szintből.
 - **A ciklus periódusa nem állandó.** A ciklus csak a fényjelre várva tartalmazza az A/D átalakítást. A gombjel időbélyegét a megszakítás és a sűrűbb ciklus pontosabbá teszi, a fényjelét az átalakítás ideje korlátozza.
-- **A megszakítások a mérő magon is futhatnak.** A mérő feladatot a saját magján alkalmazásfeladat nem szakítja meg, a rendszer megszakításai (pl. az ütemező órajele) azonban igen; ezek rövidek, de növelik a ciklusidő szórását. [BIZONYITAS: A mérő ciklus legnagyobb periódusideje (a `DIAG` parancs `max_us` értéke) sok próba után; ez adja a fényjel időbélyegének legrosszabb esetét.]
+- **A megszakítások a mérő magon is futhatnak.** A mérő feladatot a saját magján alkalmazásfeladat nem szakítja meg, a rendszer megszakításai (pl. az ütemező órajele) azonban igen. Hatásuk kicsi: 50 próbában a ciklusidő átlaga 46,5 µs, próbánkénti legnagyobb értékének mediánja 52 µs, a legnagyobb 56 µs volt (4.1. szakasz).
 - **Nincs próbaazonosító.** Az `RTIME` válasza nem tartalmazza, melyik próbához tartozik; a hozzárendelést a PC végzi a kérés–válasz sorrend alapján (6.7. szakasz).
-- **Az 1.1.0-s változat hardveres kipróbálása hátravan.** A 64 bites időbélyegeket, a verziólekérdezést és a diagnosztikai parancsokat tartalmazó forráskód hibátlanul lefordul, a mérőeszközön azonban még nem futott. [BIZONYITAS: Az 1.1.0-s firmware kipróbálása a mérőeszközön: a `CHECK`, `VERSION`, `DIAG` és `ADC` parancs válasza, valamint néhány teljes mérés annak ellenőrzésére, hogy a reakcióidők és a PC − ESP különbség a korábbi változattal egyező tartományba esnek.]
+- **Az 1.1.0-s változattal teljes mérés még nem készült.** A mérőeszközön a parancsok a leírt választ adják (`CHECK` → `OK`, `VERSION` → `1.1.0`, próba előtt `DIAG NA`, próba után `DIAG ciklus=64740 atlag_us=46.55 max_us=56 …`, fényjel nélkül `RTIME` → `NA`). [BIZONYITAS: Néhány teljes mérés az 1.1.0-s firmware-rel annak ellenőrzésére, hogy a reakcióidők és a PC − ESP különbség a korábbi változattal egyező tartományba esnek.]

@@ -9,8 +9,8 @@ A hibák két csoportba sorolhatók (2.5. szakasz). Az **állandó eltolás** mi
 !table A mérőlánc hibaforrásai és becsült nagyságrendjük || 4.3,2.2,3.9,5.6
 Hibaforrás | Jelleg | Becsült nagyság | Alap, illetve állapot
 A fotodióda válaszideje | állandó | 100 ns | adatlap [43]
-A transzimpedancia-erősítő válaszideje | állandó | kb. 7 µs a jelszint feléig (τ = 10 µs) | tervezési adat; igazolandó
-A fényjel mintavételezése (a mérő ciklus periódusa) | változó | 0 és egy ciklusidő között | a firmware `DIAG` parancsával mérendő
+A transzimpedancia-erősítő válaszideje | állandó | kb. 7 µs a jelszint feléig (τ = 10 µs) | tervezési adat; LED-del mérve a teljes lánc ≤ 16 µs
+A fényjel mintavételezése (a mérő ciklus periódusa) | változó | 0–46,5 µs, legfeljebb 56 µs | mért (`DIAG`, 50 próba)
 A küszöbátlépés függése a jelző felfutásától | állandó, kijelzőfüggő | a panel válaszidejének része (ms nagyságrend) | az inger hasonló átmenetet végez; színfüggése igazolandó
 Az időalap (kvarc) pontossága | állandó, arányos | néhány ns 300 ms-on | adatlapi adat alapján igazolandó
 A gombjel észlelése (megszakítás, ciklus) | változó | µs nagyságrend | mérendő
@@ -23,7 +23,7 @@ A szemkövető késleltetése | – | nem része az eredménynek | csak az érv�
 
 ## Az időmérő egység bizonytalansága
 
-A fényjel időbélyege a küszöb első észlelésekor készül, tehát a küszöb tényleges eléréséhez képest 0 és egy ciklusidő közötti késéssel. Egyenletes eloszlást feltételezve T ciklusidő mellett az átlagos késés T/2, a szórása T/√12. Például 40 µs-os ciklusidőnél ez 20 µs átlagos késést és 11,5 µs szórást jelentene, ami két nagyságrenddel az 1 ms-os követelmény alatt van. A tényleges ciklusidő a firmware `DIAG` parancsával olvasható ki; amíg a mérőhelyen nincs rögzítve, a számpélda csak a nagyságrendet szemlélteti.
+A fényjel időbélyege a küszöb első észlelésekor készül, tehát a küszöb tényleges eléréséhez képest 0 és egy ciklusidő közötti késéssel. Egyenletes eloszlást feltételezve T ciklusidő mellett az átlagos késés T/2, a szórása T/√12. A mért T = 46,5 µs-mal (4.1. szakasz) ez 23 µs átlagos késés és 13 µs szórás, legfeljebb 56 µs: két nagyságrenddel az 1 ms-os követelmény alatt.
 
 [BIZONYITAS: Az időmérő egység végponttól végpontig mért hibája ismert időközű jelpárral: egy jelgenerátor (vagy második mikrokontroller) egy LED-et kapcsol be a fotodióda előtt, majd pontosan ismert késleltetés (pl. 100, 200, 300 ms) után alacsonyra húzza a gombbemenetet. Az ESP által mért idő és a beállított késleltetés különbségének átlaga adja a rendszeres hibát, szórása a véletlen hibát. Ez a mérés egyetlen kísérletben igazolja a K3 és a K4 követelményt, és összevontan tartalmazza az erősítő, a mintavételezés, a gombbemenet és az időalap hibáját.]
 
@@ -72,8 +72,7 @@ A rendszer pontosságára vonatkozó állítások az alábbi mérésekkel támas
 
 !table A javasolt validációs mérések || 5.0,5.6,5.4
 Mérés | Eszközök | Mit igazol?
-Az érzékelőlánc felfutási ideje | oszcilloszkóp, négyszögjellel hajtott LED | az erősítő 10 µs-os időállandóját
-A mérő ciklus periódusideje | a firmware `DIAG` parancsa soros terminálból | a fényjel időbélyegének felbontását
+Az erősítő felfutási ideje | oszcilloszkóp, négyszögjellel hajtott LED | a 10 µs-os időállandót (felső korlát már mérve: ≤ 16 µs)
 Ismert időközű jelpár mérése | jelgenerátor vagy második mikrokontroller, LED | az időmérő egység teljes hibáját (K3, K4)
 Sötét és világos jelszint, küszöbtartalék | a firmware `ADC` és `DIAG` parancsa | a 475-ös küszöb megbízhatóságát, a környezeti fény hatását
 Gombjel a kapcsolón és a bemeneten | kétcsatornás oszcilloszkóp | az illesztő áramkör késését, a pergés idejét

@@ -70,9 +70,7 @@ A kereskedelmi eseményjelölő és időzítésvalidáló eszközök fényérzé
 
 ## Létező megoldások és korlátaik
 
-A szoftveres, időbélyeg-alapú megoldások egyszerűek, de a stimulus kezdőpontját a program belső eseményéhez kötik. Néhány tíz milliszekundumos pontossági igénynél ez elfogadható, a kijelző- és inputkésleltetés korrekciójához nem elég. [29] [1] [2] A laboratóriumi kísérletgenerátorok képkockaszintű megjelenítésvezérlést, pontosabb inputkezelést és naplózást kínálnak, de a kijelző abszolút késleltetése, a képernyőpozícióból adódó eltérés és az inputeszköz késése miatt fizikai validálást igényelnek. [1] [2] [7]
-
-A böngészőalapú megoldások nagy mintaszámnál és távoli mérésnél erősek, a hardverkörnyezet változatossága miatt viszont a rendszerkésleltetés leválasztására kevésbé alkalmasak. [29] [1] A nagysebességű kamera jó referenciaeszköz, de ismételt mérésben az adatkinyerés nehézkes, az automatizált képfeldolgozás pedig új validálási kérdéseket vet fel (melyik pixelváltozás a kezdőpont, milyen küszöbbel). [13] [30] A kereskedelmi késleltetésmérők és eseményjelölők nem kezelik feltétlenül a tekinteti érvényességet, vagy túl általánosak, illetve költségesek egy célzott vizuális reakcióidőfeladathoz. [32] [21] [31]
+A szoftveres megoldások a stimulus kezdőpontját a program belső eseményéhez kötik, ami néhány tíz milliszekundumos pontossági igénynél elfogadható [29] [1] [2]; a laboratóriumi kísérletgenerátorok és a böngészőalapú megoldások is fizikai validálást igényelnek [1] [7]. A nagysebességű kamera jó referenciaeszköz, de ismételt mérésben nehézkes [13] [30]; a kereskedelmi eszközök nem kezelik feltétlenül a tekinteti érvényességet, és költségesek [32] [21] [31].
 
 !table Megoldástípusok összevetése || 3.2,4.2,4.4,4.2
 Megoldástípus | Erősség | Korlát | Mikor megfelelő?

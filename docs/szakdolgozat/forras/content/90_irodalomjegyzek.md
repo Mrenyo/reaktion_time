@@ -86,6 +86,4 @@
 
 [44] Microsoft, “SerialPort Class,” .NET API Browser. Accessed: Apr. 30, 2026. [Online]. Available: https://learn.microsoft.com/en-us/dotnet/api/system.io.ports.serialport
 
-[45] Tobii, “Tobii Game Integration.” Accessed: Apr. 30, 2026. [Online]. Available: https://developer.tobii.com/pc-gaming/develop/tobii-game-integration/
 
-[46] Tobii, “What’s the Difference Between Tobii Eye Tracker 4C and 5?” Accessed: Apr. 30, 2026. [Online]. Available: https://help.tobii.com/hc/en-us/articles/360008539058-What-s-the-difference-between-Tobii-Eye-Tracker-4C-and-5

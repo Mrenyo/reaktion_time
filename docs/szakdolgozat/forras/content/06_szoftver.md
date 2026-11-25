@@ -15,7 +15,7 @@ Forráskód mérete | körülbelül 10 500 sor C# (a tervező által generált f
 Verzió | 2.0.0; a mérési fájlokba a forrás commit-azonosítójával együtt kerül
 Adatok helye | `Dokumentumok\ReakcioidoMeres` (beállítások, mérések, tekintetminták, napló)
 
-A PerMonitorV2 DPI-mód miatt a program koordinátái a Windows nagyításától függetlenül a kijelző tényleges képpontjai: az inger, a fotodióda-jelző és a tekintet helye ugyanabban a rendszerben értendő. A Tobii Pro SDK licence nem kereskedelmi, kutatási célú felhasználást enged.
+A PerMonitorV2 DPI-mód miatt a program koordinátái a Windows nagyításától függetlenül a kijelző tényleges képpontjai: az inger, a fotodióda-jelző és a tekintet helye ugyanabban a rendszerben értendő.
 
 ## Rétegzett felépítés
 
@@ -35,7 +35,7 @@ A mérés logikája (mikor érvényes egy próba, hová kerülhet az inger, mekk
 
 ## Model–View–Presenter és függőséginjektálás
 
-A nézetek a Model–View–Presenter (MVP) minta passzív nézet változatát követik [57]: a nézet (mérés, kalibráció, statisztika, Testreszabás) csak megjelenít és eseményeket továbbít, minden döntést a hozzá tartozó presenter hoz meg. A presenterek külső függőségei interfészek (`IGazeTracker`, `IResponseDevice`, `IMeasurementRepository`, `IExperimentSettingsProvider`, `IDisplayTimingProvider`); a megvalósításokat a belépési pont (`Program.Main`) hozza létre és konstruktoron át adja át, külön keretrendszer nélkül („pure DI”) [58], így a presenterek hardver nélkül is futtathatók. A tekintet-ellenőrzés módjait az `IGazeValidationRule` három megvalósítása (`NoGazeValidationRule`, `LookAtStimulusRule`, `KeepFixationRule`) hordozza; a nézet és a presenter minden módban ugyanaz.
+A nézetek a Model–View–Presenter (MVP) minta passzív nézet változatát követik [55]: a nézet (mérés, kalibráció, statisztika, Testreszabás) csak megjelenít és eseményeket továbbít, minden döntést a hozzá tartozó presenter hoz meg. A presenterek külső függőségei interfészek (`IGazeTracker`, `IResponseDevice`, `IMeasurementRepository`, `IExperimentSettingsProvider`, `IDisplayTimingProvider`); a megvalósításokat a belépési pont (`Program.Main`) hozza létre és konstruktoron át adja át, külön keretrendszer nélkül („pure DI”) [56], így a presenterek hardver nélkül is futtathatók. A tekintet-ellenőrzés módjait az `IGazeValidationRule` három megvalósítása (`NoGazeValidationRule`, `LookAtStimulusRule`, `KeepFixationRule`) hordozza; a nézet és a presenter minden módban ugyanaz.
 
 ## Egy mérés menete
 
@@ -71,7 +71,7 @@ A 2. lépés egy fejlesztés közben feltárt hiba javítása. Kezdetben a korre
 
 ### Az előperiódus
 
-Az inger előtti várakozás (előperiódus) hossza próbánként véletlen, hogy a résztvevő ne tudja ritmusból megjósolni az inger megjelenését [18] [56]. Az eloszlás egyenletes vagy csonkolt exponenciális (alapértelmezés). Az utóbbi eloszlásfüggvénye a legrövidebb (a) és a leghosszabb (b) várakozás között, μ paraméterrel:
+Az inger előtti várakozás (előperiódus) hossza próbánként véletlen, hogy a résztvevő ne tudja ritmusból megjósolni az inger megjelenését [18] [54]. Az eloszlás egyenletes vagy csonkolt exponenciális (alapértelmezés). Az utóbbi eloszlásfüggvénye a legrövidebb (a) és a leghosszabb (b) várakozás között, μ paraméterrel:
 
 !eq F(x) = \frac{1 - e^{-(x-a)/\mu}}{1 - e^{-(b-a)/\mu}}, \qquad a \leq x \leq b
 
@@ -126,7 +126,7 @@ A TMDK-dolgozat egyszerűsített képlete a képkockaidőt a kijelző magasság�
 
 ahol *f* a pontos frissítési frekvencia, *N*összes a képjel összes sora a holtidővel együtt, *N*aktív a látható sorok száma, *H* az asztal magassága képpontban, *y*inger és *y*jelző pedig az inger, illetve a jelző középpontjának sora a kijelző tetejétől (egész sorra kerekítve). A *k* szorzó azt adja meg, hány jelsor tartozik egy képpontsorhoz; értéke 1, ha nincs skálázás.
 
-A bemeneteket a program a mérés elején egyszer, a Windows `QueryDisplayConfig` függvényével kérdezi le a mérést futtató kijelzőre [50] [51]. Ha a pontos időzítés nem kérdezhető le, egész frekvenciával és holtidő nélkül számol, és ezt a mérési fájlban jelzi (`ScanoutTimingExact=False`).
+A bemeneteket a program a mérés elején egyszer, a Windows `QueryDisplayConfig` függvényével kérdezi le a mérést futtató kijelzőre [48] [49]. Ha a pontos időzítés nem kérdezhető le, egész frekvenciával és holtidő nélkül számol, és ezt a mérési fájlban jelzi (`ScanoutTimingExact=False`).
 
 **Számpélda.** A fejlesztői mérésekhez használt kijelző adatai a mérési fájlok szerint: 1920 × 1080 képpont, 74,9725 Hz, 1080 látható és összesen 1119 sor. Ebből a képkockaidő 13 338,2 µs, egy sor ideje 11,92 µs. Az egyik próbában az inger középpontja a 260., a jelzőé az 1033. sorban volt; a korrekció (260 − 1033) · 11,92 µs ≈ −9214 µs, vagyis az inger sora körülbelül 9,2 ms-mal a jelző sora előtt rajzolódik ki. A mérési fájlban ehhez a próbához −9213,983 µs szerepel. Ezen a kijelzőn a korrekció a teljes képmagasságra legfeljebb körülbelül 12,9 ms; a holtidő figyelmen kívül hagyása ezt 1119/1080 arányban, azaz 3,6%-kal becsülné túl.
 
@@ -152,7 +152,7 @@ PC → ESP | ESP → PC | Mikor és miért
 előjeles szám, pl. `-9259.259` | – | minden próba előtt: a scanout-korrekció µs-ban; egyben az új próba kezdete
 `RTIME` | szám µs-ban (pl. `250000.000`) vagy `NA` | a résztvevő kattintása után; a PC legfeljebb 1 s-ig vár
 
-A protokollt az `EspResponseDevice` valósítja meg; a `Serial` háttérben futó olvasóciklussal, időkorláttal párosítja a beérkező sorokat a várakozó kérésekkel, a `SerialPortConnection` a rendszer soros portját burkolja. Az `EspPortFinder` az USB-azonosítók alapján automatikusan megkeresi az ESP portját; több ilyen eszköznél a port a Testreszabásban választható ki. A program a portot háttérszálon nyitja meg, foglalt portnál legfeljebb nyolcszor próbálkozik, a megnyitás után 1,5 másodpercet vár, és kiüríti a puffereket.
+A protokollt az `EspResponseDevice` valósítja meg: háttérben futó olvasóciklus párosítja a beérkező sorokat a várakozó kérésekkel, időkorláttal. Az ESP portját a program az USB-azonosítók alapján automatikusan megkeresi; több ilyen eszköznél a port a Testreszabásban választható ki.
 
 A válasz nem tartalmaz próbaazonosítót: a PC az `RTIME` után érkező első elfogadható sort (`NA` vagy nemnegatív, véges szám) az éppen futó próbához rendeli, minden más sort figyelmen kívül hagy. Mivel az ESP csak kérésre válaszol, és minden korrekció új próbát kezd, korábbi próba válasza csak az 1 másodperces várakozás lejárta után, késve érkezve keveredhetne ide.
 
@@ -164,7 +164,7 @@ A reakcióidő akkor is lehet technikailag pontos, ha a próba viselkedési szem
 
 ### A Tobii Pro SDK használata
 
-A program a szemkövetőt a Tobii Pro SDK .NET-változatán keresztül éri el [52]. A felhasznált funkciók:
+A program a szemkövetőt a Tobii Pro SDK .NET-változatán keresztül éri el [50]. A felhasznált funkciók:
 
 - **eszközkeresés** (`FindAllEyeTrackers`), háttérszálon;
 - **tekintetadat-folyam** (`GazeDataReceived`): mintánként a két szem tekintetpontja a kijelző síkján, normalizált (0–1) koordinátában, szemenkénti érvényességi jelzéssel és az eszköz időbélyegével;
@@ -175,8 +175,6 @@ A program a szemkövetőt a Tobii Pro SDK .NET-változatán keresztül éri el [
 Egy tekintetminta akkor érvényes, ha legalább az egyik szem érvényes, és a koordinátái véges számok. A minták a próba teljes ideje alatt rögzülnek, a döntésbe azonban csak a válaszablakba esők számítanak. A program a szem merőleges távolságát is rögzíti a kijelző síkjától (a két szem átlagát), hogy a képpontban megadott méretek utólag látószögre válthatók legyenek.
 
 A kalibrációt a gyártó programja (Tobii Pro Eye Tracker Manager) végzi, amelyet a program el tud indítani. A kalibráció nézetben a meglévő kalibráció használata vagy újrakalibrálás választható; a program mindkét esetben ellenőrzi, hogy egy másodperc alatt érkezik-e érvényes tekintetadat. Tekintet-ellenőrzéses mérés csak megerősített kalibráció után nyitható meg.
-
-A TMDK-dolgozat irodalomjegyzékében a szemkövető szoftveres integrációjánál a Tobii játékokhoz szánt fejlesztői csomagjára és fogyasztói eszközeire vonatkozó források szerepeltek ([45], [46]). A megvalósított program a kutatási célú Tobii Pro SDK-t használja, ezért ezek helyett a [52] és az [53] forrás az irányadó.
 
 ### A három tekintet-ellenőrzési mód
 
@@ -251,7 +249,7 @@ A program minden próba sorát azonnal a fájl végére írja, és a lemezre ür
 
 ## Statisztika
 
-A statisztika nézetben bármelyik korábbi mérés kiválasztható; a táblázat minden próbát mutat a két reakcióidővel, a különbségükkel és az érvényességgel. Az összesítés az érvényes mért próbák átlagát, mediánját és szórását adja meg a hardveres időre, a helyi időre és a kettő különbségére; a reakcióidők eloszlása jobbra ferde [59], ezért a medián a megbízhatóbb mutató. A **PC − ESP** különbség a rendszer késleltetésének próbánkénti becslése: az átlaga a mérőlánc jellemző késleltetését, a szórása annak ingadozását mutatja, a szokatlanul nagy vagy negatív érték pedig hibára utal (6.4. szakasz).
+A statisztika nézetben bármelyik korábbi mérés kiválasztható; a táblázat minden próbát mutat a két reakcióidővel, a különbségükkel és az érvényességgel. Az összesítés az érvényes mért próbák átlagát, mediánját és szórását adja meg a hardveres időre, a helyi időre és a kettő különbségére; a reakcióidők eloszlása jobbra ferde [57], ezért a medián a megbízhatóbb mutató. A **PC − ESP** különbség a rendszer késleltetésének próbánkénti becslése: az átlaga a mérőlánc jellemző késleltetését, a szórása annak ingadozását mutatja, a szokatlanul nagy vagy negatív érték pedig hibára utal (6.4. szakasz).
 
 ## Szálkezelés és hibakezelés
 
@@ -266,5 +264,3 @@ A szemkövető kiesik ellenőrzés nélküli mérésben | a mérés tekintetadat
 Mentési hiba | a mérés megszakad, a már kiírt próbák megmaradnak
 A résztvevő vagy a kutató megszakítja (Esc) | a mérés megszakítottként zárul le, az addigi próbák mentve maradnak
 Váratlan programhiba | a naplóba kerül; a mérési fájl lezáró sor nélkül marad, ami jelzi a szabálytalan befejezést
-
-A mérés vége után a gombok 1,5 másodpercig nem használhatók, hogy a válaszegér egy késve érkező kattintása ne indítson azonnal új mérést. A hibák részletei a naplófájlba kerülnek.

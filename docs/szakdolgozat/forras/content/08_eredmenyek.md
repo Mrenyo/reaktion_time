@@ -74,7 +74,7 @@ Az adatok a rendszer kipróbálása közben keletkeztek, nem előre megtervezett
 
 A 2026. november 10-i mérések egy részében egyetlen próbához sem tartozik hardveres reakcióidő: az ESP `NA` választ adott, a mérés pedig a szándék szerint a PC-n mért időkkel végigfutott, és minden próba mentésre került. [HIANYZO ADAT: Annak oka, hogy a 2026. november 10-i, 13:06 és 13:11 között készült négy mérésben az ESP nem adott reakcióidőt (például a fotodióda nem volt a jelzőn, vagy a gombjel nem volt csatlakoztatva). A fájlokból az ok nem állapítható meg.]
 
-A 2026. november 8-i mérések egy részében a PC − ESP különbség egyes próbákban nagy negatív érték (−465 és −2505 ms között). Ez a 6.4. szakaszban leírt hiba nyoma: az ESP az előző próba lecsengő fényjelét vette az új próba kezdetének. A hibát a két idő próbánkénti összevetése tette észrevehetővé, a későbbi mérésekben ilyen érték nem fordul elő; a helyi idő megtartása ellenőrző adatként tehát akkor is hasznos, ha az eredmény nem erre épül.
+A 2026. november 8-i mérések egyes próbáiban a PC − ESP különbség nagy negatív érték (−465 és −2505 ms között): ez a 6.4. szakaszban leírt, azóta javított hiba nyoma.
 
 ## A tekintet-ellenőrzés eredményei
 

@@ -6,11 +6,11 @@ A mérőhardver négy részből áll: az ESP32-S3 mikrokontrollerből, a fotodi�
 
 A reakcióidőt külön időmérő egység számítja ki még az adatküldés előtt, így az adatátvitel, az operációs rendszer ütemezése és a szoftveres eseményfeldolgozás változékonysága nem kerül az eredménybe.
 
-Az egység ESP32-S3 alapú fejlesztőlap [41] N16R8 jelű modullal (16 MB flash, 8 MB PSRAM [49]); a TMDK-dolgozatban még általánosan ESP32-S3 fejlesztőpanel szerepelt. A firmware PSRAM-ot nem igényel; a választást a lap elérhetősége indokolta, a nagyobb memória a mérést nem befolyásolja.
+Az egység ESP32-S3 alapú fejlesztőlap [41] N16R8 jelű modullal (16 MB flash, 8 MB PSRAM [47]); a TMDK-dolgozatban még általánosan ESP32-S3 fejlesztőpanel szerepelt. A firmware PSRAM-ot nem igényel; a választást a lap elérhetősége indokolta, a nagyobb memória a mérést nem befolyásolja.
 
 !fig foto_esp32s3.png | 5 | ESP32-S3 fejlesztőlap (a kép a TMDK-dolgozatból származik).
 
-[HIANYZO ADAT: A fejlesztőlap pontos típusa és gyártója (pl. ESP32-S3-DevKitC-1 N16R8 vagy azzal lábkompatibilis utángyártott lap), valamint a lapon lévő USB–soros átalakító típusa. A NYÁK-rajz 2 × 22 lábas foglalata az ESP32-S3-DevKitC-1 lábkiosztásának felel meg, a firmware projektje pedig soros (UART) feltöltésre van beállítva.]
+A lapról kiolvasott adatok (`esptool`): ESP32-S3 (QFN56, v0.2-es revízió) 8 MB tokba épített PSRAM-mal, 40 MHz-es kvarc, 16 MB flash. Az USB–soros átalakító WCH CH343 (USB-azonosító 1A86:55D3); az eredeti ESP32-S3-DevKitC-1 CP2102N-t használ, így a lap azzal lábkompatibilis utángyártott változat. [HIANYZO ADAT: A fejlesztőlap gyártója (a lap feliratáról).]
 
 !table Az ESP32-S3 N16R8 mérés szempontjából lényeges jellemzői || 4.6,5.2,6.2
 Jellemző | Érték | Szerepe a mérésben
@@ -19,12 +19,10 @@ Memória | 16 MB flash, 8 MB PSRAM | nem korlátozó; a firmware néhány száz 
 Időzítő | `esp_timer`, 1 µs felbontás, 64 bites számláló [42] | a két esemény közös időalapja
 A/D átalakító | 12 bites SAR ADC; ADC1 3-as csatorna = GPIO4 [39] | a fotodióda-erősítő kimenetének mintavételezése
 Digitális bemenet | GPIO5, belső felhúzó ellenállás, élvezérelt megszakítás [40] | a válaszgomb jele
-Soros kapcsolat | UART0 (115200 baud) USB–soros átalakítón keresztül | parancsok és eredmény a PC felé
+Soros kapcsolat | UART0 (115200 baud), WCH CH343 USB–soros átalakító | parancsok és eredmény a PC felé
 Tápellátás | USB-ről, 5 V; a lapon 3,3 V-os stabilizátor | külön tápegység nem kell
 
-A 240 MHz-es órajel (a keretrendszer alapértelmezése 160 MHz) nem nanoszekundumos pontosságot jelent, hanem azt, hogy az időbélyegzés, a küszöbfigyelés és a kivonás számítási ideje nagyságrendekkel kisebb a mérendő reakcióidőnél, és a mérő ciklus a lehető legrövidebb.
-
-Az A/D átalakító adatlap szerinti legnagyobb mintavételi sebessége (100 kSPS [39]) elvi felső korlát: a firmware egyenkénti (oneshot) módban, programból olvassa, ezért a tényleges mintavételi periódust a mérő ciklus futási ideje adja. Ezt a firmware maga méri, és a `DIAG` paranccsal lekérdezhető (5.7. szakasz). [BIZONYITAS: A mérő ciklus tényleges periódusideje (két egymást követő ADC-olvasás közti idő): a firmware `DIAG` parancsának `atlag_us` és `max_us` értéke több próba után, a mérőhelyen. Ez adja a fényjel időbélyegének felbontását; az 1 ms alatti pontosság állításához ennek igazoltan néhány tíz mikroszekundumnak kell lennie.]
+Az A/D átalakító adatlap szerinti legnagyobb mintavételi sebessége (100 kSPS [39]) elvi felső korlát: a firmware egyenkénti (oneshot) módban, programból olvassa, ezért a tényleges mintavételi periódust a mérő ciklus futási ideje adja. Ezt a firmware maga méri (`DIAG`, 5.7. szakasz). Az 1.1.0-s firmware-rel 50, egyenként 2 s-os próbában (3,24 millió ciklus) a periódusidő átlaga 46,5 µs volt (próbánként 46,51–46,55 µs), a legnagyobb 56 µs. A fényjel időbélyegének felbontása tehát kb. 47 µs, a legrosszabb esetben 56 µs.
 
 Az N16R8 modul az oktális PSRAM miatt a GPIO35–37 lábakat belsőleg használja; a mérőáramkör ezeket nem használja. A fotodióda bemenete az ADC1 egység csatornája, mert az ADC2 a vezeték nélküli funkciókkal osztozik. A firmware vezeték nélküli kapcsolatot nem használ, így rádiós tevékenység nem zavarja az időzítést.
 
@@ -40,7 +38,7 @@ A fényérzékelő BPW34 típusú szilícium PIN fotodióda. A választás szemp
 
 !fig foto_bpw34.png | 4.5 | BPW34 PIN fotodióda (a kép a TMDK-dolgozatból származik).
 
-!table A BPW34 fotodióda adatlapi jellemzői és jelentőségük [43] [54] || 4.4,4.6,7.0
+!table A BPW34 fotodióda adatlapi jellemzői és jelentőségük [43] [52] || 4.4,4.6,7.0
 Jellemző | Adatlapi érték | Jelentősége
 Spektrális érzékenység (λ0,1) | 430–1100 nm | lefedi a kijelző fehér fényének látható összetevőit
 Sugárzásérzékeny felület | 7,5 mm² | nem igényel képpontnyi pontosságú illesztést, a jelzőnégyzet fényét átlagolja
@@ -55,7 +53,7 @@ A kijelző megvilágítása a jelző felületén a szerző becslése szerint 900
 
 ### A transzimpedancia-erősítő
 
-A TMDK-dolgozatban a fotodióda jele közvetlenül az ESP bemenetére került; ilyenkor a dióda kapacitása és a nagy értékű terhelő ellenállás lassítja a jelet, a jelszint pedig a terheléstől függ. A végleges változatban a diódát transzimpedancia-erősítő (áram–feszültség átalakító) követi, amely a diódát közel nulla feszültségen tartja (a műveleti erősítő virtuális földpontján), így a kapacitása nem töltődik át, a kimeneti feszültség pedig a fényárammal arányos. [55]
+A TMDK-dolgozatban a fotodióda jele közvetlenül az ESP bemenetére került; ilyenkor a dióda kapacitása és a nagy értékű terhelő ellenállás lassítja a jelet, a jelszint pedig a terheléstől függ. A végleges változatban a diódát transzimpedancia-erősítő (áram–feszültség átalakító) követi, amely a diódát közel nulla feszültségen tartja (a műveleti erősítő virtuális földpontján), így a kapacitása nem töltődik át, a kimeneti feszültség pedig a fényárammal arányos. [53]
 
 !fig fig_kapcsolas.png | 16 | A két illesztő áramkör elvi rajza. A rajz a működési elvet mutatja, nem a megépített kapcsolás pontos mása.
 
@@ -67,9 +65,9 @@ ahol Rf a visszacsatoló ellenállás, Cf a vele párhuzamos kondenzátor, amely
 
 [HIANYZO ADAT: A fotodióda-erősítő kapcsolási rajza és alkatrészértékei: a műveleti erősítő típusa (a NYÁK-on U2, 8 lábú DIP tok), a visszacsatoló ellenállás és kondenzátor értéke (a 10 µs időállandót adó Rf és Cf), a tápfeszültség, valamint az, hogy a dióda előfeszítés nélkül (fotovoltaikus üzemben) vagy záróirányú előfeszítéssel működik-e. A NYÁK-rajzon R4, R5, C1 és C2 szerepel; ezek szerepe a kapcsolási rajz nélkül nem állapítható meg egyértelműen.]
 
-[BIZONYITAS: Az érzékelőlánc (fotodióda + erősítő) válaszideje: oszcilloszkópos mérés az erősítő kimenetén gyorsan kapcsolt fényforrással (pl. négyszögjellel hajtott LED), a 10–90%-os felfutási idő és az időállandó meghatározása. Ez igazolja a 10 µs-os tervezési értéket.]
+Az érzékelőlánc válaszidejére felső korlátot ad egy LED-es mérés (a repó `led_fotodioda_meres/` mappája). Az ESP egy LED-et kapcsol be a fotodióda előtt, és méri, mennyi idő múlva éri el az erősítő kimenete a 150-es nyers ADC-küszöböt; az ADC-t ehhez közvetlenül a regiszterből olvassa (egy olvasás 6,4 µs). Két, egyenként 500 mérésből álló sorozatban 996 mérés adott 15 µs-ot; a kivételek 13 µs (kétszer, a sorozat elején), 8 µs és 16 µs (egyszer-egyszer). A LED, a fotodióda, az erősítő és a mintavétel együttes késése tehát jellemzően 15 µs, legfeljebb 16 µs, 6,4 µs-os felbontással. [BIZONYITAS: Az erősítő 10–90%-os felfutási ideje és időállandója oszcilloszkóppal, a 10 µs-os tervezési érték pontos igazolására.]
 
-Az erősítő kimenete az ESP GPIO4 lábára (ADC1, 3-as csatorna) csatlakozik. A firmware az átalakítót 0 dB csillapítással használja, amelynél a mérési tartomány körülbelül 0–0,95 V [47]. A firmware-ben rögzített megfigyelés szerint a jelző fekete állapotában az átalakító 0 körüli, fehér állapotában 950 körüli nyers értéket ad (a 0–4095 tartományból), a küszöb ennek a fele, 475. [BIZONYITAS: A fekete és a fehér jelzőhöz tartozó ADC-értékek eloszlása (átlag, szórás, legkisebb és legnagyobb érték) a mérésre használt kijelzőn és annak szokásos fényerő-beállításánál; ebből a 475-ös küszöb zajtartaléka mindkét irányban. A szintek a firmware `ADC` parancsával olvashatók ki (fehér jelzőnél az áthelyező nézetben, fekete jelzőnél a mérési nézet előterében). Érdemes megadni azt is, mekkora fényerő-csökkentésig működik megbízhatóan a detektálás.]
+Az erősítő kimenete az ESP GPIO4 lábára (ADC1, 3-as csatorna) csatlakozik. A firmware az átalakítót 0 dB csillapítással használja, amelynél a mérési tartomány körülbelül 0–0,95 V [45]. A firmware-ben rögzített megfigyelés szerint a jelző fekete állapotában az átalakító 0 körüli, fehér állapotában 950 körüli nyers értéket ad (a 0–4095 tartományból), a küszöb ennek a fele, 475. [BIZONYITAS: A fekete és a fehér jelzőhöz tartozó ADC-értékek eloszlása (átlag, szórás, legkisebb és legnagyobb érték) a mérésre használt kijelzőn és annak szokásos fényerő-beállításánál; ebből a 475-ös küszöb zajtartaléka mindkét irányban. A szintek a firmware `ADC` parancsával olvashatók ki (fehér jelzőnél az áthelyező nézetben, fekete jelzőnél a mérési nézet előterében). Érdemes megadni azt is, mekkora fényerő-csökkentésig működik megbízhatóan a detektálás.]
 
 A küszöbátlépés időpontja a kijelző képpontjainak felfutásától is függ: a firmware azt a pillanatot rögzíti, amikor a jelző fényessége eléri a végérték körülbelül felét. Ez a késés a panel válaszidejének része, és minden próbában hasonló. Alapértelmezett (fehér inger sötét háttéren) beállításnál a jelző és az inger felfutása közel azonos; eltérő színeknél a két átmenet ideje különbözhet (7.4. szakasz).
 
@@ -141,7 +139,7 @@ A modellek alakja alapján a doboz alja téglatest alakú tálca, a négy sarká
 
 ## A szemmozgáskövető
 
-A tekintetet képernyő alá szerelhető Tobii Pro szemmozgáskövető ellenőrzi, amelyet a program a Tobii Pro SDK-n keresztül ér el (6.8. szakasz). A TMDK-dolgozat a Tobii Pro Spark eszközt mutatta be; ez 60 Hz-es mintavételű, USB-n csatlakozó, képernyőalapú szemkövető [53].
+A tekintetet képernyő alá szerelhető Tobii Pro szemmozgáskövető ellenőrzi, amelyet a program a Tobii Pro SDK-n keresztül ér el (6.8. szakasz). A TMDK-dolgozat a Tobii Pro Spark eszközt mutatta be; ez 60 Hz-es mintavételű, USB-n csatlakozó, képernyőalapú szemkövető [51].
 
 !fig foto_tobii.png | 5 | Tobii Pro Spark szemmozgáskövető (a kép a TMDK-dolgozatból származik).
 
